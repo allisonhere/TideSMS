@@ -55,22 +55,8 @@ func (m *Model) View() string {
 	if !m.ready {
 		return ""
 	}
-	// The inline image replaces the whole frame rather than composing into a
-	// panel, so its escape sequence is never measured as text.
-	if m.mediaPreview {
-		if s := m.renderMediaFullscreen(); s != "" {
-			return s
-		}
-	}
-	// After an inline image, tell the terminal to drop it before repainting the
-	// frame; otherwise a kitty image can linger over the conversation.
-	clear := ""
-	if m.clearImages {
-		m.clearImages = false
-		clear = "\x1b_Ga=d\x1b\\"
-	}
 	if m.history.enabled {
-		return clear + m.historyView()
+		return m.historyView()
 	}
 	theme := themes.Resolve(m.cfg.General.Theme, m.recipient.Theme, m.recipient.PhoneNumber)
 	r := tideui.NewRenderer(theme, tideui.StyleOptions{PaneCorners: tideui.RoundCorners, ModalShadow: true})
@@ -119,7 +105,7 @@ func (m *Model) View() string {
 		overlay := m.renderModal(r)
 		layout.Modal = &overlay
 	}
-	return clear + r.Render(layout)
+	return r.Render(layout)
 }
 func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	w := max(20, min(66, m.width-8))

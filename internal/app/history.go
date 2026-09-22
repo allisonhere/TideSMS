@@ -631,8 +631,14 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		}
 	case "v":
 		if msg := h.view.Current(); msg != nil && msg.HasMedia() {
+			// A downloaded image opens at full quality; otherwise the viewer
+			// explains how to fetch it.
+			for _, a := range msg.Attachments {
+				if p := localFile(a); p != "" {
+					return externalPreview(p)
+				}
+			}
 			m.openMediaViewer(*msg)
-			return nil
 		}
 	case "r":
 		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {

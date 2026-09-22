@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/allisonhere/tidesms/internal/domain"
-	"github.com/allisonhere/tidesms/internal/media"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -30,13 +29,11 @@ func tempPNG(t *testing.T) string {
 	return path
 }
 
-// The viewer lists metadata, previews inline only when the terminal can draw,
-// and never opens anything without confirmation.
-func TestMediaViewerPreviewSaveAndOpen(t *testing.T) {
+// The viewer lists metadata, and never opens anything without confirmation.
+func TestMediaViewerSaveAndOpen(t *testing.T) {
 	path := tempPNG(t)
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
-	m.graphics = media.Kitty
 	m.mediaAtts = []domain.Attachment{{
 		ID: "a1", MIMEType: "image/png", Filename: "pic.png", Size: 1234,
 		LocalPath: path, State: domain.AttachmentAvailable,
@@ -49,14 +46,13 @@ func TestMediaViewerPreviewSaveAndOpen(t *testing.T) {
 		t.Fatalf("viewer body:\n%s", body)
 	}
 
-	m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
-	if !m.mediaPreview {
-		t.Fatal("preview did not enable")
+	// v launches the suspended external viewer, which the tests must not run.
+	if cmd := m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")}); cmd == nil {
+		t.Fatal("v should launch the external viewer for a local image")
 	}
-	if view := m.View(); !strings.Contains(view, "\x1b_G") {
-		t.Fatalf("inline image escape missing: %q", view)
+	if m.modal != "media" {
+		t.Fatalf("v should not change the modal: %q", m.modal)
 	}
-	m.mediaPreview = false
 
 	// Opening requires explicit confirmation.
 	m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
@@ -80,14 +76,12 @@ func TestMediaViewerPreviewSaveAndOpen(t *testing.T) {
 	}
 }
 
-// Downloading fetches the part through the backend, records it, and enables
-// preview, open and save.
+// Downloading fetches the part through the backend and records it.
 func TestMediaDownloadUsesBackend(t *testing.T) {
 	path := tempPNG(t)
 	m, b, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	b.AttachmentPath = path
-	m.graphics = media.Kitty
 	m.mediaAtts = []domain.Attachment{{ID: "a1", MIMEType: "image/png", Filename: "pic.png", PartID: 12, RemoteID: "PART_x", State: domain.AttachmentMetadata}}
 	m.mediaIndex = 0
 	m.modal = "media"
@@ -108,35 +102,37 @@ func TestMediaDownloadUsesBackend(t *testing.T) {
 	if m.mediaAtts[0].Width != 4 || m.mediaAtts[0].Height != 2 {
 		t.Fatalf("dimensions not read: %+v", m.mediaAtts[0])
 	}
-	m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
-	if !m.mediaPreview {
-		t.Fatal("preview should work after download")
+	if cmd := m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")}); cmd == nil {
+		t.Fatal("v should launch the external viewer after download")
 	}
 }
 
-// v in the conversation opens the viewer and, with Kitty and a local file,
-// draws the image immediately.
-func TestConversationVPreviews(t *testing.T) {
+// v in the conversation launches the image when a local copy exists, and opens
+// the metadata viewer otherwise.
+func TestConversationVOpensImage(t *testing.T) {
 	path := tempPNG(t)
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	openThreadByID(t, d, amyThread)
 	d.settle("history", func() bool { return len(m.history.view.Messages) == 3 })
-	m.graphics = media.Kitty
-	m.history.view.Messages[0].Attachments = []domain.Attachment{{
-		ID: "a1", MIMEType: "image/png", Filename: "pic.png", LocalPath: path, State: domain.AttachmentAvailable,
-	}}
 	m.setPane(paneConversation)
 	m.history.view.Selected = 0
-	d.press("v")
-	if m.modal != "media" {
-		t.Fatalf("viewer modal = %q", m.modal)
+
+	// No local copy: the viewer opens so the message can explain d download.
+	m.history.view.Messages[0].Attachments = []domain.Attachment{{ID: "a1", MIMEType: "image/png", State: domain.AttachmentMetadata}}
+	cmd := m.conversationKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if cmd != nil || m.modal != "media" {
+		t.Fatalf("no local copy should open the viewer: cmd=%v modal=%q", cmd != nil, m.modal)
 	}
-	if !m.mediaPreview {
-		t.Fatal("Kitty with a local file should preview at once")
+	m.modal = ""
+
+	// Local copy: launch the external image viewer without a command in tests.
+	m.history.view.Messages[0].Attachments = []domain.Attachment{{ID: "a1", MIMEType: "image/png", Filename: "pic.png", LocalPath: path, State: domain.AttachmentAvailable}}
+	if cmd := m.conversationKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")}); cmd == nil {
+		t.Fatal("v should launch the external viewer for a local image")
 	}
-	if view := m.View(); !strings.Contains(view, "\x1b_G") {
-		t.Fatalf("inline image escape missing: %q", view)
+	if m.modal != "" {
+		t.Fatalf("v should not open the metadata modal: %q", m.modal)
 	}
 }
 
@@ -146,11 +142,9 @@ func TestMediaViewerWithoutLocalCopy(t *testing.T) {
 	m.mediaAtts = []domain.Attachment{{ID: "a1", MIMEType: "image/jpeg", Filename: "x.jpg", State: domain.AttachmentMetadata}}
 	m.mediaIndex = 0
 	m.modal = "media"
-	m.graphics = media.Kitty
 
-	m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
-	if m.mediaPreview {
-		t.Fatal("preview should not enable without a local file")
+	if cmd := m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")}); cmd != nil {
+		t.Fatal("v should do nothing without a local file")
 	}
 	if cmd := m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")}); cmd != nil {
 		t.Fatal("open should not run without a local file")

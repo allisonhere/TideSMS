@@ -34,18 +34,6 @@ func (m *Model) openMediaViewer(msg domain.Message) {
 	m.mediaIndex = 0
 	m.mediaMsgID = msg.ID
 	m.modal = "media"
-	// When the terminal can draw and the file is already local, show it at
-	// once; v returns to the details and actions.
-	m.mediaPreview = m.canPreview()
-}
-
-// canPreview reports whether the current part can be drawn inline.
-func (m *Model) canPreview() bool {
-	a, ok := m.currentAttachment()
-	if !ok || localFile(a) == "" {
-		return false
-	}
-	return m.graphics == media.Kitty || m.graphics == media.ITerm
 }
 
 // localFile returns an attachment's path only when it names a real file. It
@@ -72,25 +60,13 @@ func (m *Model) currentAttachment() (domain.Attachment, bool) {
 func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "esc", "q":
-		if m.mediaPreview {
-			m.clearImages = true
-		}
-		m.mediaPreview = false
 		m.modal = ""
 		return nil
 	case "left", "h", "p":
-		if m.mediaPreview {
-			m.clearImages = true
-		}
 		m.mediaIndex = max(0, m.mediaIndex-1)
-		m.mediaPreview = false
 		return nil
 	case "right", "l", "n":
-		if m.mediaPreview {
-			m.clearImages = true
-		}
 		m.mediaIndex = min(len(m.mediaAtts)-1, m.mediaIndex+1)
-		m.mediaPreview = false
 		return nil
 	case "c":
 		a, ok := m.currentAttachment()
@@ -116,9 +92,27 @@ func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 	case "d":
 		return m.fetchAttachment()
 	case "v":
-		m.toggleMediaPreview()
+		a, ok := m.currentAttachment()
+		if !ok || localFile(a) == "" {
+			m.notify("No local copy to view — press d to download", true)
+			return nil
+		}
+		return externalPreview(localFile(a))
 	}
 	return nil
+}
+
+// externalPreview suspends the TUI and lets the binary draw the image on the
+// real terminal. TideUI panes pad every line, so a raw graphics escape cannot
+// survive inside them; a suspended child is the reliable path, and it works
+// for Kitty, iTerm2 and a braille fallback alike.
+func externalPreview(path string) tea.Cmd {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	cmd := exec.Command(exe, "image", path)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg { return attachmentOpenedMsg{err: err} })
 }
 
 // attachmentFetchedMsg reports a downloaded attachment.
@@ -183,49 +177,6 @@ func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) toggleMediaPreview() {
-	a, ok := m.currentAttachment()
-	if !ok {
-		return
-	}
-	if localFile(a) == "" {
-		m.notify("No local copy to preview — press d to download", true)
-		return
-	}
-	if m.graphics == media.None || m.graphics == media.Sixel {
-		m.notify("This terminal cannot draw images; open externally instead", true)
-		return
-	}
-	if m.mediaPreview {
-		m.clearImages = true
-	}
-	m.mediaPreview = !m.mediaPreview
-}
-
-// renderMediaFullscreen draws the image with the terminal's graphics protocol.
-// It replaces the whole view rather than composing into a TideUI panel, so the
-// escape sequence is never measured as text.
-func (m *Model) renderMediaFullscreen() string {
-	a, ok := m.currentAttachment()
-	if !ok {
-		return ""
-	}
-	// A generous but bounded view; smaller terminals scale down.
-	cols := max(20, min(120, m.width-8))
-	rows := max(6, min(50, m.height-6))
-	seq, ok := media.Render(m.graphics, localFile(a), cols, rows)
-	if !ok {
-		m.mediaPreview = false
-		return ""
-	}
-	kind, size := media.Describe(a.MIMEType, a.Filename, a.Size)
-	name := a.Filename
-	if name == "" {
-		name = strings.ToLower(kind)
-	}
-	return seq + "\n\n" + name + " · " + size + "\n\nv or Esc back"
-}
-
 // mediaViewerLines is the text shown when no image is drawn.
 func (m *Model) mediaViewerLines() string {
 	a, ok := m.currentAttachment()
@@ -251,8 +202,8 @@ func (m *Model) mediaViewerLines() string {
 	} else {
 		b.WriteString("No local copy: press d to download\n")
 	}
-	if m.graphics != media.None && m.graphics != media.Sixel && local != "" {
-		b.WriteString("v previews inline\n")
+	if local != "" {
+		b.WriteString("v opens the image\n")
 	}
 	return b.String()
 }

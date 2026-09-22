@@ -9,7 +9,6 @@ import (
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/keys"
-	"github.com/allisonhere/tidesms/internal/media"
 	"github.com/allisonhere/tidesms/internal/notifications"
 	"github.com/allisonhere/tidesms/internal/search"
 	"github.com/allisonhere/tidesms/internal/storage"
@@ -18,7 +17,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -106,9 +104,6 @@ type Model struct {
 	mediaAtts       []domain.Attachment
 	mediaIndex      int
 	mediaMsgID      string
-	graphics        media.Protocol
-	mediaPreview    bool
-	clearImages     bool
 	pendingOpenPath string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
@@ -174,7 +169,6 @@ func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config
 	m.searchInput = textinput.New()
 	m.searchInput.CharLimit = 120
 	m.searchInput.Placeholder = "Search all messages…"
-	m.graphics = media.Detect(os.Getenv)
 	m.assistant = buildAssistant(c)
 	if startupError != nil {
 		m.configLocked = true

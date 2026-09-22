@@ -18,6 +18,15 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
+	// Hidden subcommand: draw one image on the terminal while the TUI is
+	// suspended. The running binary invokes itself this way for a real image.
+	if len(os.Args) > 2 && os.Args[1] == "image" {
+		if err := runImageViewer(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "TideSMS:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "TideSMS:", err)
 		os.Exit(1)
