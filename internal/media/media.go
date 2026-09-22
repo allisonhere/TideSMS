@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Protocol is the terminal graphics capability the environment advertises.
@@ -160,6 +162,88 @@ func toPNG(data []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return buf.Bytes(), true
+}
+
+// textCache remembers rendered half-block art, keyed by file identity and size,
+// so a conversation does not decode the same image on every frame.
+var textCache sync.Map
+
+// TextImage renders an image as half-block ANSI art sized to at most maxCols by
+// maxRows cells, preserving aspect. Each cell carries two vertical pixels with
+// U+2580. The result is ordinary text: it scrolls, frames and truncates like any
+// other line, and needs no terminal graphics support.
+func TextImage(path string, maxCols, maxRows int) ([]string, bool) {
+	if path == "" || maxCols < 1 || maxRows < 1 {
+		return nil, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return nil, false
+	}
+	key := path + "|" + strconv.FormatInt(fi.ModTime().UnixNano(), 10) + "|" + strconv.Itoa(maxCols) + "x" + strconv.Itoa(maxRows)
+	if cached, ok := textCache.Load(key); ok {
+		return cached.([]string), true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, false
+	}
+	lines := halfBlocks(img, maxCols, maxRows)
+	if len(lines) == 0 {
+		return nil, false
+	}
+	textCache.Store(key, lines)
+	return lines, true
+}
+
+func halfBlocks(img image.Image, maxCols, maxRows int) []string {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w < 1 || h < 1 {
+		return nil
+	}
+	cols := min(maxCols, w)
+	// A cell is roughly twice as tall as it is wide.
+	rows := cols * h / (2 * w)
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > maxRows {
+		rows = maxRows
+		if c := rows * 2 * w / h; c < cols {
+			cols = max(1, c)
+		}
+	}
+	pixel := func(cx, py int) (uint8, uint8, uint8) {
+		x := b.Min.X + cx*w/cols
+		y := b.Min.Y + py*h/(rows*2)
+		r, g, bl, _ := img.At(x, y).RGBA()
+		return uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8)
+	}
+	lines := make([]string, 0, rows)
+	for row := 0; row < rows; row++ {
+		var sb strings.Builder
+		var lastTop, lastBottom [3]uint8
+		have := false
+		for cx := 0; cx < cols; cx++ {
+			tr, tg, tb := pixel(cx, row*2)
+			br, bg, bb := pixel(cx, row*2+1)
+			top, bottom := [3]uint8{tr, tg, tb}, [3]uint8{br, bg, bb}
+			if !have || top != lastTop || bottom != lastBottom {
+				fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm", tr, tg, tb, br, bg, bb)
+				lastTop, lastBottom, have = top, bottom, true
+			}
+			sb.WriteRune('▀')
+		}
+		sb.WriteString("\x1b[0m")
+		lines = append(lines, sb.String())
+	}
+	return lines
 }
 
 // ImageSize decodes just the header for width and height.

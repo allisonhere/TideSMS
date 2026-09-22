@@ -37,6 +37,9 @@ type Config struct {
 		// two directions. Empty keeps the surface derived from the pane theme.
 		IncomingTheme string `toml:"incoming_theme"`
 		OutgoingTheme string `toml:"outgoing_theme"`
+		// InlineMedia draws a downloaded image as half-block text in the
+		// conversation rather than only in the viewer.
+		InlineMedia bool `toml:"inline_media"`
 	} `toml:"conversation"`
 
 	General struct {
@@ -103,6 +106,7 @@ func Default() Config {
 	c.Conversation.Bubbles = true
 	c.Conversation.Corners = "round"
 	c.Conversation.FillBubbles = true
+	c.Conversation.InlineMedia = true
 	return c
 }
 func Load(path string) (Config, error) {

@@ -1,12 +1,18 @@
 package conversation
 
 import (
+	"bytes"
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -403,5 +409,42 @@ func TestMediaOnlyMessage(t *testing.T) {
 	}
 	if !strings.Contains(joined, "[ image: image ]") {
 		t.Fatalf("attachment block missing:\n%s", joined)
+	}
+}
+
+func convTempPNG(t *testing.T) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	img.Set(1, 0, color.RGBA{G: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "pic.png")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A downloaded image is drawn inline as half-block text when enabled, and as
+// the compact block when not.
+func TestInlineMediaRendersHalfBlocks(t *testing.T) {
+	msg := message(domain.Incoming, "pic")
+	msg.Attachments = []domain.Attachment{{
+		ID: "a1", MessageID: msg.ID, MIMEType: "image/png", LocalPath: convTempPNG(t),
+		Width: 4, Height: 2, State: domain.AttachmentAvailable,
+	}}
+	inline := strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart", InlineMedia: true}), "\n")
+	if !strings.Contains(inline, "▀") {
+		t.Fatalf("no inline art:\n%s", ansi.Strip(inline))
+	}
+	block := strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart"}), "\n")
+	if strings.Contains(block, "▀") {
+		t.Fatal("inline art drawn when disabled")
+	}
+	if !strings.Contains(ansi.Strip(block), "[ image:") {
+		t.Fatalf("compact block missing:\n%s", ansi.Strip(block))
 	}
 }

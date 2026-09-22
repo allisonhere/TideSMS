@@ -35,7 +35,10 @@ type Options struct {
 	Incoming, Outgoing themes.Bubble
 	// HighlightID marks a message the user jumped to, so it stands out briefly
 	// from the messages around it. It styles only the sender line.
-	HighlightID       string
+	HighlightID string
+	// InlineMedia draws a local image as half-block art inside the message
+	// instead of a text block.
+	InlineMedia       bool
 	Timestamps, Query string
 }
 type Model struct {
@@ -188,6 +191,14 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		// Attachments render as a compact block after the body, so media never
 		// blocks the conversation and needs no local file to be listed.
 		for _, a := range msg.Attachments {
+			// A local image can be drawn as text right here; anything else, or
+			// an image not yet downloaded, keeps the compact block.
+			if opts.InlineMedia {
+				if lines, ok := media.TextImage(a.LocalPath, min(bw, 40), 8); ok {
+					wrapped = append(wrapped, lines...)
+					continue
+				}
+			}
 			kind, size := media.Describe(a.MIMEType, a.Filename, a.Size)
 			name := a.Filename
 			if name == "" {

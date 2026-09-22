@@ -22,6 +22,7 @@ const (
 	settingFill
 	settingBubbleIn
 	settingBubbleOut
+	settingInlineMedia
 	settingScheduler
 )
 
@@ -44,6 +45,7 @@ func (m *Model) settingsFields() []settingsField {
 		settingsField{settingFill, "Bubble fill"},
 		settingsField{settingBubbleIn, "Incoming bubbles"},
 		settingsField{settingBubbleOut, "Outgoing bubbles"},
+		settingsField{settingInlineMedia, "Inline images"},
 		settingsField{settingScheduler, "Background sending"},
 	)
 }
@@ -151,6 +153,8 @@ func (m *Model) settingsValue(id settingID, selected bool) string {
 			return contactThemeNames()[m.bubbleOutCursor]
 		}
 		return bubbleName(m.cfg.Conversation.OutgoingTheme)
+	case settingInlineMedia:
+		return onOff(m.cfg.Conversation.InlineMedia)
 	case settingScheduler:
 		return onOff(m.cfg.Scheduler.Enabled)
 	}
@@ -230,6 +234,10 @@ func (m *Model) settingsActivate() tea.Cmd {
 	case settingBubbleOut:
 		c := m.cfg
 		c.Conversation.OutgoingTheme = globalBubbleTheme(contactThemeNames()[m.bubbleOutCursor])
+		return m.saveConfig(c)
+	case settingInlineMedia:
+		c := m.cfg
+		c.Conversation.InlineMedia = !c.Conversation.InlineMedia
 		return m.saveConfig(c)
 	case settingScheduler:
 		c := m.cfg

@@ -242,7 +242,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The

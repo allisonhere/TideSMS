@@ -95,3 +95,17 @@ func TestRenderOnlyForSupportedProtocols(t *testing.T) {
 		t.Fatal("missing file should not render")
 	}
 }
+
+func TestTextImageRendersHalfBlocks(t *testing.T) {
+	path := pngFile(t)
+	lines, ok := TextImage(path, 20, 5)
+	if !ok || len(lines) == 0 {
+		t.Fatalf("no art: ok=%v lines=%d", ok, len(lines))
+	}
+	if !strings.Contains(lines[0], "\u2580") {
+		t.Fatalf("no block rune: %q", lines[0])
+	}
+	if _, ok := TextImage(filepath.Join(t.TempDir(), "missing.png"), 20, 5); ok {
+		t.Fatal("missing file should not render")
+	}
+}
