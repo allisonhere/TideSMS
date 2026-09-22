@@ -91,7 +91,7 @@ func (m *Model) historyView() string {
 		// wanted when it is being used, and the conversation gets the width.
 		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
 		if h.pane == paneContacts {
-			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.filtered(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: true}
+			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: true}
 		}
 		layout.Panes = [3]tideui.Pane{sidebar, rightPane}
 	} else {
@@ -101,7 +101,7 @@ func (m *Model) historyView() string {
 		active := rightPane
 		switch h.pane {
 		case paneContacts:
-			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, m.filtered(), m.selected, m.recipient.PhoneNumber, max(1, m.width-2), body, m.query, m.searching), Focused: true}
+			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, m.width-2), body, m.query, m.searching), Focused: true}
 		case paneThreads:
 			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body, threadThemes), Focused: true}
 		}

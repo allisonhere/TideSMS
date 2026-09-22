@@ -65,7 +65,7 @@ func (m *Model) View() string {
 	if m.width < 54 || m.height < 16 {
 		return r.Render(tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, Panes: [3]tideui.Pane{{Title: "TideSMS", Content: "Resize to at least 54 × 16\nDrafts remain safe.\nCtrl+P → Quit"}}})
 	}
-	list := components.ContactList(r, m.filtered(), max(0, m.selected), m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching)
+	list := components.ContactList(r, m.contactRows(), max(0, m.selected), m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching)
 	title := "New Message"
 	if m.sending {
 		title = "Sending…"

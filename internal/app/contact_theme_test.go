@@ -5,7 +5,10 @@ import (
 
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/themes"
 )
+
+func themesNamesForTest() []string { return themes.Names }
 
 // A thread's row shows the palette its conversation will open in: its own
 // override when it has one, otherwise the theme of the contact it belongs to.
@@ -199,5 +202,103 @@ func TestThreadThemeResolutionOrder(t *testing.T) {
 	thread.ThemeID = "tokyo-night"
 	if got := themeOf(); got != "tokyo-night" {
 		t.Errorf("thread theme should win outright: got %q", got)
+	}
+}
+
+// rowTheme is the palette the sidebar would draw for a contact right now.
+func rowTheme(m *Model, phone string) string {
+	for _, c := range m.contactRows() {
+		if c.PhoneNumber == phone {
+			return c.Theme
+		}
+	}
+	return "(absent)"
+}
+
+// A palette being chosen shows in the sidebar at the same moment it shows in
+// the conversation. A preview that reached only half of what it recolours is
+// worse than none: the row would keep contradicting the conversation until the
+// choice was committed.
+func TestContactThemePreviewReachesTheSidebar(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.settle("history", func() bool { return len(m.history.view.Messages) > 0 })
+	phone := m.recipient.PhoneNumber
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Contact theme")
+	m.settingsAdjust(1)
+
+	preview, ok := m.settingsContactPreview()
+	if !ok || preview == "" {
+		t.Fatalf("no preview offered: %q ok=%v", preview, ok)
+	}
+	if got := rowTheme(m, phone); got != preview {
+		t.Errorf("the contact row did not follow the preview: row %q, preview %q", got, preview)
+	}
+	if got := m.threadThemes()[amyThread]; got != preview {
+		t.Errorf("the thread row did not follow the preview: row %q, preview %q", got, preview)
+	}
+	if got := m.conversationTheme().Name; got != preview {
+		t.Errorf("the conversation did not follow the preview: %q", got)
+	}
+
+	// Leaving the panel drops the preview and the row returns to what is stored.
+	m.modal = ""
+	if _, _, ok := m.pendingContactTheme(); ok {
+		t.Error("a preview survived closing the panel")
+	}
+}
+
+// The picker t opens previews the same way the settings row does.
+func TestThemePickerPreviewsTheSidebarRow(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.settle("contacts", func() bool { return len(m.filtered()) > 0 })
+
+	target := m.filtered()[0]
+	m.editing = target
+	m.modal = "themes"
+	m.choices = append([]string{"automatic"}, themesNamesForTest()...)
+	m.choice = 2
+
+	want := m.choices[2]
+	if got := rowTheme(m, target.PhoneNumber); got != want {
+		t.Errorf("the picker did not preview the row: got %q, want %q", got, want)
+	}
+	// "automatic" previews no override rather than the literal word.
+	m.choice = 0
+	if got := rowTheme(m, target.PhoneNumber); got != "" {
+		t.Errorf("automatic previewed as %q, want no override", got)
+	}
+}
+
+// A preview belongs to the contact being edited and to no other row.
+func TestPreviewColoursOnlyItsOwnRow(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+
+	// Two contacts of our own, so the preview has somewhere wrong to land.
+	m.contacts = []contacts.Contact{
+		{ID: "c-target", Name: "Target", PhoneNumber: "+15550001"},
+		{ID: "c-other", Name: "Other", PhoneNumber: "+15550002"},
+	}
+	m.query = ""
+	list := m.filtered()
+	if len(list) < 2 {
+		t.Fatalf("expected both contacts to be listed, got %d", len(list))
+	}
+	target, other := list[0], list[1]
+	m.editing = target
+	m.modal = "themes"
+	m.choices = append([]string{"automatic"}, themesNamesForTest()...)
+	m.choice = 2
+
+	if got := rowTheme(m, target.PhoneNumber); got != m.choices[2] {
+		t.Errorf("the edited contact was not previewed: %q", got)
+	}
+	if got := rowTheme(m, other.PhoneNumber); got == m.choices[2] {
+		t.Errorf("a different contact borrowed the preview: %q", got)
 	}
 }

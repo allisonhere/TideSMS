@@ -534,6 +534,45 @@ func (m *Model) settingsBubblePreview(outgoing bool) (string, bool) {
 	return globalBubbleTheme(contactThemeNames()[cursor]), true
 }
 
+// pendingContactTheme returns the contact whose theme is being chosen right
+// now and the palette highlighted for it, from either surface that offers the
+// choice: the settings panel's row, or the picker t opens. An "automatic"
+// choice yields an empty name, meaning the contact keeps no override.
+//
+// It is deliberately not scoped to the open conversation. A live preview has
+// to reach everywhere that contact is drawn — their sidebar row as much as
+// their conversation — and only each caller knows which of those it is
+// painting.
+func (m *Model) pendingContactTheme() (contacts.Contact, string, bool) {
+	switch m.modal {
+	case "themes":
+		if m.choice < 0 || m.choice >= len(m.choices) {
+			return contacts.Contact{}, "", false
+		}
+		return m.editing, blankAutomatic(m.choices[m.choice]), true
+	case "settings":
+		f, ok := m.selectedSetting()
+		if !ok || f.id != settingContactTheme {
+			return contacts.Contact{}, "", false
+		}
+		c, ok := m.settingsContact()
+		if !ok {
+			return contacts.Contact{}, "", false
+		}
+		return c, blankAutomatic(contactThemeNames()[m.contactCursor]), true
+	}
+	return contacts.Contact{}, "", false
+}
+
+// blankAutomatic maps the picker's "automatic" onto the empty name the rest of
+// the code uses for "no override".
+func blankAutomatic(name string) string {
+	if name == "automatic" {
+		return ""
+	}
+	return name
+}
+
 // settingsContactPreview returns the contact theme highlighted in the panel,
 // with "automatic" resolving to no override.
 //
@@ -546,40 +585,45 @@ func (m *Model) settingsContactPreview() (string, bool) {
 	if m.modal != "settings" {
 		return "", false
 	}
-	f, ok := m.selectedSetting()
-	if !ok || f.id != settingContactTheme {
+	c, name, ok := m.pendingContactTheme()
+	if !ok || !sameContact(c, m.recipient) {
 		return "", false
-	}
-	if !m.previewTargetsConversation() {
-		return "", false
-	}
-	name := contactThemeNames()[m.contactCursor]
-	if name == "automatic" {
-		return "", true
 	}
 	return name, true
 }
 
-// previewTargetsConversation reports whether the contact the settings panel is
-// editing is the one whose conversation is open.
-func (m *Model) previewTargetsConversation() bool {
-	c, ok := m.settingsContact()
+// sameContact reports whether two records name the same person. Numbers
+// written differently still match, which is what decides whose conversation is
+// open everywhere else.
+func sameContact(a, b contacts.Contact) bool {
+	if a.ID != "" && a.ID == b.ID {
+		return true
+	}
+	if a.PhoneNumber == "" || b.PhoneNumber == "" {
+		return false
+	}
+	if a.PhoneNumber == b.PhoneNumber {
+		return true
+	}
+	key := contacts.MatchKey(a.PhoneNumber)
+	return key != "" && key == contacts.MatchKey(b.PhoneNumber)
+}
+
+// contactRows returns the sidebar's contacts with any live theme preview
+// applied, so choosing a palette recolours the row at the same moment it
+// recolours the conversation rather than only once it is committed.
+func (m *Model) contactRows() []contacts.Contact {
+	list := m.filtered()
+	target, name, ok := m.pendingContactTheme()
 	if !ok {
-		return false
+		return list
 	}
-	if c.ID != "" && c.ID == m.recipient.ID {
-		return true
+	for i := range list {
+		if sameContact(list[i], target) {
+			list[i].Theme = name
+		}
 	}
-	if c.PhoneNumber == "" || m.recipient.PhoneNumber == "" {
-		return false
-	}
-	if c.PhoneNumber == m.recipient.PhoneNumber {
-		return true
-	}
-	// Numbers written differently can still be the same person, which is what
-	// decides whose conversation is open everywhere else.
-	key := contacts.MatchKey(c.PhoneNumber)
-	return key != "" && key == contacts.MatchKey(m.recipient.PhoneNumber)
+	return list
 }
 
 // beginSettingEdit opens the inline editor for a typed row. The API key starts

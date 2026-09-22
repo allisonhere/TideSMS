@@ -252,6 +252,23 @@ func (m *Model) threadThemes() map[string]string {
 			byNumber[key] = p
 		}
 	}
+	// A palette being chosen right now shows in the row immediately, as it
+	// already does in the conversation: a preview that reached only half of
+	// what it recolours is worse than none.
+	if target, name, ok := m.pendingContactTheme(); ok && target.PhoneNumber != "" {
+		p := byNumber[target.PhoneNumber]
+		p.theme = name
+		byNumber[target.PhoneNumber] = p
+		if key := contacts.MatchKey(target.PhoneNumber); key != "" {
+			byNumber[key] = p
+		}
+	}
+	// The thread picker previews the open thread the same way.
+	previewThread, previewingThread := "", false
+	if name, ok := m.previewing("thread-themes"); ok && m.history.active != nil {
+		previewThread, previewingThread = name, true
+	}
+
 	out := make(map[string]string, len(m.history.threads))
 	for _, t := range m.history.threads {
 		var own palette
@@ -264,7 +281,11 @@ func (m *Model) threadThemes() map[string]string {
 				}
 			}
 		}
-		if name := themes.First(t.ThemeID, own.theme, t.ThemeIn, own.bubbleIn); name != "" {
+		threadTheme := t.ThemeID
+		if previewingThread && m.history.active.ID == t.ID {
+			threadTheme = previewThread
+		}
+		if name := themes.First(threadTheme, own.theme, t.ThemeIn, own.bubbleIn); name != "" {
 			out[t.ID] = name
 		}
 	}
