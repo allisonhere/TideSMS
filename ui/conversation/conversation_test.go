@@ -384,7 +384,7 @@ func TestAttachmentBlockRenders(t *testing.T) {
 		Size: 1_800_000, Width: 1920, Height: 1080, State: domain.AttachmentMetadata,
 	}}
 	joined := ansi.Strip(strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart"}), "\n"))
-	for _, want := range []string{"[ image: dinner.jpg ]", "1920×1080 · 1.8 MB", "Enter to preview"} {
+	for _, want := range []string{"[ image: dinner.jpg ]", "1920×1080 · 1.8 MB", "v preview"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in:\n%s", want, joined)
 		}

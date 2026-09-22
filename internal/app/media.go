@@ -33,8 +33,19 @@ func (m *Model) openMediaViewer(msg domain.Message) {
 	m.mediaAtts = msg.Attachments
 	m.mediaIndex = 0
 	m.mediaMsgID = msg.ID
-	m.mediaPreview = false
 	m.modal = "media"
+	// When the terminal can draw and the file is already local, show it at
+	// once; v returns to the details and actions.
+	m.mediaPreview = m.canPreview()
+}
+
+// canPreview reports whether the current part can be drawn inline.
+func (m *Model) canPreview() bool {
+	a, ok := m.currentAttachment()
+	if !ok || a.LocalPath == "" {
+		return false
+	}
+	return m.graphics == media.Kitty || m.graphics == media.ITerm
 }
 
 func (m *Model) currentAttachment() (domain.Attachment, bool) {

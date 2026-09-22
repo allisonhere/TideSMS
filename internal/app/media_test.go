@@ -114,6 +114,32 @@ func TestMediaDownloadUsesBackend(t *testing.T) {
 	}
 }
 
+// v in the conversation opens the viewer and, with Kitty and a local file,
+// draws the image immediately.
+func TestConversationVPreviews(t *testing.T) {
+	path := tempPNG(t)
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.settle("history", func() bool { return len(m.history.view.Messages) == 3 })
+	m.graphics = media.Kitty
+	m.history.view.Messages[0].Attachments = []domain.Attachment{{
+		ID: "a1", MIMEType: "image/png", Filename: "pic.png", LocalPath: path, State: domain.AttachmentAvailable,
+	}}
+	m.setPane(paneConversation)
+	m.history.view.Selected = 0
+	d.press("v")
+	if m.modal != "media" {
+		t.Fatalf("viewer modal = %q", m.modal)
+	}
+	if !m.mediaPreview {
+		t.Fatal("Kitty with a local file should preview at once")
+	}
+	if view := m.View(); !strings.Contains(view, "\x1b_G") {
+		t.Fatalf("inline image escape missing: %q", view)
+	}
+}
+
 func TestMediaViewerWithoutLocalCopy(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)

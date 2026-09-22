@@ -197,7 +197,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			if d := media.Dimensions(a.Width, a.Height); d != "" {
 				meta = d + " · " + meta
 			}
-			for _, line := range []string{fmt.Sprintf("[ %s: %s ]", strings.ToLower(kind), name), meta, "Enter to preview"} {
+			for _, line := range []string{fmt.Sprintf("[ %s: %s ]", strings.ToLower(kind), name), meta, "v preview"} {
 				wrapped = append(wrapped, ansi.Truncate(line, max(1, bw), "…"))
 			}
 		}

@@ -629,6 +629,11 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		if msg := h.view.Current(); msg != nil {
 			return m.copyText(msg.Body)
 		}
+	case "v":
+		if msg := h.view.Current(); msg != nil && msg.HasMedia() {
+			m.openMediaViewer(*msg)
+			return nil
+		}
 	case "r":
 		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {
 			h.retryID = msg.ID

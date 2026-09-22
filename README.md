@@ -91,6 +91,7 @@ A message that arrives in the thread you are looking at updates it silently. One
 | Conversation | g / G | Oldest loaded / newest message |
 | Conversation | Enter | Message inspector |
 | Conversation | y / r | Copy body / reply (retry a failed message) |
+| Conversation | v | Preview the selected message's attachment |
 | Conversation | / then n/N, Esc | Search this thread, step matches, exit |
 | Any pane | Tab / Shift+Tab | Cycle threads / conversation / composer |
 | Contacts | Esc / c | Return to the thread list |
@@ -133,7 +134,7 @@ The queued, sending, sent, failed and paused states are persisted, and a message
 
 Media is capability-gated: the interface only offers what the backend reports it can carry. `backend.Capabilities` records `SendText`, `ReceiveText`, `Groups`, `ReceiveMedia`, `SendMedia`, `DeliveryStatus` and `ContactSync`; media sending and delivery receipts stay false for KDE Connect, while receiving media is on.
 
-A message with media shows a compact block after its body — `[ image: dinner.jpg ]`, the dimensions and size, and a preview hint — and the conversation never waits on a download. **Enter** on the message, then **View attachment**, opens a viewer that lists each part with its kind, size and state. The part starts as metadata only; **d** downloads it on demand through KDE Connect's `requestAttachmentFile`, and the daemon's cached file (`~/.cache/kdeconnect.daemon/<device>/`) becomes the local copy. Then **←/→** move between parts, **v** draws the image inline, **o** opens it externally (after an explicit confirmation), **s** copies it to the download directory without overwriting, and **c** copies its path.
+A message with media shows a compact block after its body — `[ image: dinner.jpg ]`, the dimensions and size, and a `v preview` hint — and the conversation never waits on a download. **v** on the selected message opens its attachment viewer directly (and draws the image at once when the terminal supports it and the file is local); **Enter**, then **View attachment**, reaches the same viewer through the message actions. The part starts as metadata only; **d** downloads it on demand through KDE Connect's `requestAttachmentFile`, and the daemon's cached file (`~/.cache/kdeconnect.daemon/<device>/`) becomes the local copy. Then **←/→** move between parts, **v** draws the image inline, **o** opens it externally (after an explicit confirmation), **s** copies it to the download directory without overwriting, and **c** copies its path.
 
 Inline drawing uses the Kitty graphics protocol or iTerm2 inline images, detected from the environment; Sixel is recognised but not drawn. With no graphics support the viewer stays a text list. Files are never opened or executed automatically, and a part with no local copy simply cannot be opened rather than failing.
 

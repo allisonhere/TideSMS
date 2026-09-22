@@ -54,7 +54,7 @@ func (m *Model) historyView() string {
 	lines = append(lines, ed[:eh]...)
 	hint := "Enter / F12 send · Shift+Enter newline · Alt+Esc history"
 	if h.pane == paneConversation {
-		hint = "j/k select · r reply · / search · G newest"
+		hint = "j/k select · r reply · v preview · / search · G newest"
 	}
 	if h.search || h.searchQuery != "" {
 		hint = "/ " + h.searchQuery + fmt.Sprintf(" · %d matches · n/N next", len(h.searchResults))
