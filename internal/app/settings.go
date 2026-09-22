@@ -536,6 +536,12 @@ func (m *Model) settingsBubblePreview(outgoing bool) (string, bool) {
 
 // settingsContactPreview returns the contact theme highlighted in the panel,
 // with "automatic" resolving to no override.
+//
+// It previews onto the open conversation only when the contact being edited is
+// that conversation's own. The panel edits whichever contact is selected, which
+// need not be the one on screen: cycling one person's theme used to repaint a
+// different person's conversation, showing a colour that would never be applied
+// to it.
 func (m *Model) settingsContactPreview() (string, bool) {
 	if m.modal != "settings" {
 		return "", false
@@ -544,11 +550,36 @@ func (m *Model) settingsContactPreview() (string, bool) {
 	if !ok || f.id != settingContactTheme {
 		return "", false
 	}
+	if !m.previewTargetsConversation() {
+		return "", false
+	}
 	name := contactThemeNames()[m.contactCursor]
 	if name == "automatic" {
 		return "", true
 	}
 	return name, true
+}
+
+// previewTargetsConversation reports whether the contact the settings panel is
+// editing is the one whose conversation is open.
+func (m *Model) previewTargetsConversation() bool {
+	c, ok := m.settingsContact()
+	if !ok {
+		return false
+	}
+	if c.ID != "" && c.ID == m.recipient.ID {
+		return true
+	}
+	if c.PhoneNumber == "" || m.recipient.PhoneNumber == "" {
+		return false
+	}
+	if c.PhoneNumber == m.recipient.PhoneNumber {
+		return true
+	}
+	// Numbers written differently can still be the same person, which is what
+	// decides whose conversation is open everywhere else.
+	key := contacts.MatchKey(c.PhoneNumber)
+	return key != "" && key == contacts.MatchKey(m.recipient.PhoneNumber)
 }
 
 // beginSettingEdit opens the inline editor for a typed row. The API key starts

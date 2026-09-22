@@ -83,3 +83,16 @@ func Resolve(global, override, identity string) tideui.Theme {
 	}
 	return base
 }
+
+// Accent returns the highlight colour a named theme paints with, which is what
+// a list uses to show at a glance which palette a contact carries. An empty or
+// unrecognised name returns "", meaning the row has no accent of its own and
+// should be left in the surrounding palette: Base falls back to a default
+// theme, and tinting every row with that would say a contact has a theme when
+// it has none.
+func Accent(name string) lipgloss.Color {
+	if name == "" || !Valid(name) {
+		return ""
+	}
+	return Base(name).BorderFocus
+}

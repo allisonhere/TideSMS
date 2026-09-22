@@ -1,0 +1,125 @@
+package components
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/themes"
+	"github.com/allisonhere/tideui"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
+)
+
+// truecolor forces a colour profile, because lipgloss strips every escape when
+// it decides the output is not a terminal — which it is not under go test.
+func truecolor(t *testing.T) {
+	t.Helper()
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+}
+
+func testRenderer() tideui.Renderer {
+	return tideui.NewRenderer(themes.Base("catppuccin-mocha"), tideui.StyleOptions{})
+}
+
+// sgrFor is the foreground sequence a theme's accent renders as.
+func sgrFor(t *testing.T, theme string) string {
+	t.Helper()
+	accent := themes.Accent(theme)
+	if accent == "" {
+		t.Fatalf("theme %q has no accent", theme)
+	}
+	rendered := lipgloss.NewStyle().Foreground(accent).Render("x")
+	prefix, _, found := strings.Cut(rendered, "x")
+	if !found || prefix == "" {
+		t.Fatalf("no opening sequence for %q: %q", theme, rendered)
+	}
+	return prefix
+}
+
+// A contact's theme is visible where contacts are chosen, not only once their
+// conversation is open.
+func TestContactListTintsThemedNames(t *testing.T) {
+	truecolor(t)
+	list := []contacts.Contact{
+		{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"},
+		{Name: "Family", PhoneNumber: "+1555000003"},
+	}
+	// Select neither row, so the tint is not suppressed by the selection.
+	out := ContactList(testRenderer(), list, -1, "", 30, 8, "", false)
+	rows := strings.Split(out, "\n")
+
+	amy, family := rows[0], rows[1]
+	if !strings.Contains(amy, sgrFor(t, "rose-pine")) {
+		t.Errorf("a themed contact was not tinted: %q", amy)
+	}
+	if strings.Contains(family, sgrFor(t, "rose-pine")) {
+		t.Errorf("an unthemed contact borrowed another's accent: %q", family)
+	}
+	// Both rows still read correctly and occupy the same width.
+	if got := ansi.Strip(amy); !strings.Contains(got, "Amy") {
+		t.Errorf("name lost: %q", got)
+	}
+	if w := ansi.StringWidth(amy); w != ansi.StringWidth(family) {
+		t.Errorf("tinting changed the row width: %d vs %d", w, ansi.StringWidth(family))
+	}
+}
+
+// Selection is drawn by inverting the row, and an accent chosen for the pane
+// background carries no contrast guarantee on it.
+func TestSelectedRowIsNotTinted(t *testing.T) {
+	truecolor(t)
+	list := []contacts.Contact{{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"}}
+	selected := ContactList(testRenderer(), list, 0, "", 30, 8, "", false)
+	if strings.Contains(selected, sgrFor(t, "rose-pine")) {
+		t.Errorf("the selected row was tinted over the selection highlight: %q", strings.Split(selected, "\n")[0])
+	}
+}
+
+// The tint closes with a reset, which would otherwise drop the row's
+// background for everything after the name. TideUI reopens it; this is the
+// guard that it still does.
+func TestTintDoesNotPunchAHoleInTheRow(t *testing.T) {
+	truecolor(t)
+	list := []contacts.Contact{{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"}}
+	row := strings.Split(ContactList(testRenderer(), list, -1, "", 30, 8, "", false), "\n")[0]
+
+	// After the name's reset the row style must be re-established, so the row
+	// does not end on a bare reset with padding left unpainted.
+	name := strings.Index(row, "Amy")
+	if name < 0 {
+		t.Fatalf("name missing: %q", row)
+	}
+	after := row[name+len("Amy"):]
+	reset := strings.Index(after, "\x1b[0m")
+	if reset < 0 {
+		t.Fatalf("the tint was never closed: %q", row)
+	}
+	if !strings.Contains(after[reset+len("\x1b[0m"):], "\x1b[") {
+		t.Errorf("nothing reopened after the tint, so the row's padding is unpainted: %q", row)
+	}
+}
+
+// A thread shows the palette its conversation will open in.
+func TestThreadsTintFromTheSuppliedMap(t *testing.T) {
+	truecolor(t)
+	ts := []domain.Thread{
+		{ID: "t1", DisplayName: "Amy", LastMessage: "hi"},
+		{ID: "t2", DisplayName: "Family", LastMessage: "hi"},
+	}
+	out := Threads(testRenderer(), ts, "t2", 30, 12, map[string]string{"t1": "nord"})
+	if !strings.Contains(out, sgrFor(t, "nord")) {
+		t.Error("a thread with a theme was not tinted")
+	}
+	if !strings.Contains(ansi.Strip(out), "Family") {
+		t.Error("an unthemed thread stopped rendering")
+	}
+	// A thread absent from the map has no theme of its own.
+	if out2 := Threads(testRenderer(), ts, "t2", 30, 12, nil); strings.Contains(out2, sgrFor(t, "nord")) {
+		t.Error("a thread was tinted with no themes supplied")
+	}
+}

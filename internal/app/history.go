@@ -222,6 +222,49 @@ func (m *Model) selectedThread() *domain.Thread {
 	}
 	return nil
 }
+
+// threadThemes maps each thread to the palette its row should show: the
+// thread's own override when it has one, otherwise the theme of the contact it
+// belongs to. A group has no single contact, so it shows only an explicit
+// thread theme.
+//
+// Without this a theme set on a contact was visible only once their
+// conversation was open, which made the sidebar no help at all in telling
+// people apart.
+func (m *Model) threadThemes() map[string]string {
+	out := make(map[string]string, len(m.history.threads))
+	byNumber := make(map[string]string, len(m.contacts))
+	for _, c := range m.contacts {
+		if c.Theme == "" {
+			continue
+		}
+		byNumber[c.PhoneNumber] = c.Theme
+		if key := contacts.MatchKey(c.PhoneNumber); key != "" {
+			byNumber[key] = c.Theme
+		}
+	}
+	for _, t := range m.history.threads {
+		if t.ThemeID != "" {
+			out[t.ID] = t.ThemeID
+			continue
+		}
+		if t.IsGroup || len(t.Participants) != 1 {
+			continue
+		}
+		number := t.Participants[0].Number
+		if theme := byNumber[number]; theme != "" {
+			out[t.ID] = theme
+			continue
+		}
+		if key := contacts.MatchKey(number); key != "" {
+			if theme := byNumber[key]; theme != "" {
+				out[t.ID] = theme
+			}
+		}
+	}
+	return out
+}
+
 func (m *Model) layoutConversation() {
 	if !m.history.enabled {
 		return

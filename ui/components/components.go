@@ -2,12 +2,37 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"strings"
 )
+
+// tinted paints text in a theme's accent, so a list shows which palette a
+// contact or thread carries rather than leaving a theme visible only once its
+// conversation is open.
+//
+// The span closes with a reset, which is safe inside a row: TideUI renders a
+// row through StyleOver, and that re-opens the row's own attributes after every
+// reset, so only the name is tinted and the suffix and padding are unaffected.
+//
+// A selected row is left alone. Selection is drawn by inverting the row, and a
+// foreground chosen for the pane background has no contrast guarantee on it;
+// the accent is still visible on every other row.
+func tinted(text, theme string, selected bool) string {
+	if selected || theme == "" {
+		return text
+	}
+	accent := themes.Accent(theme)
+	if accent == "" {
+		return text
+	}
+	return lipgloss.NewStyle().Foreground(accent).Render(text)
+}
 
 func ContactList(r tideui.Renderer, items []contacts.Contact, selected int, active string, w, h int, query string, searching bool) string {
 	rows := []string{}
@@ -25,7 +50,8 @@ func ContactList(r tideui.Renderer, items []contacts.Contact, selected int, acti
 		if items[i].Synced {
 			suffix = "⟲"
 		}
-		rows = append(rows, r.RenderRow(tideui.Row{Prefix: prefix, Text: contacts.SafeLabel(items[i].Name), Suffix: suffix, Selected: i == selected}, w))
+		name := tinted(contacts.SafeLabel(items[i].Name), items[i].Theme, i == selected)
+		rows = append(rows, r.RenderRow(tideui.Row{Prefix: prefix, Text: name, Suffix: suffix, Selected: i == selected}, w))
 	}
 	for len(rows) < visible {
 		rows = append(rows, "")

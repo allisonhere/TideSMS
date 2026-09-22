@@ -15,6 +15,7 @@ func (m *Model) historyView() string {
 	// it stays on the global one.
 	cr := m.conversationRenderer()
 	h := &m.history
+	threadThemes := m.threadThemes()
 	left, right, body, eh := m.dimensions()
 	cw := max(1, right-2)
 	name := m.recipient.Name
@@ -88,7 +89,7 @@ func (m *Model) historyView() string {
 		// Contacts share the sidebar with threads rather than holding a column of
 		// their own: threads already carry resolved names, so the list is only
 		// wanted when it is being used, and the conversation gets the width.
-		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body), Focused: h.pane == paneThreads}
+		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
 		if h.pane == paneContacts {
 			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.filtered(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: true}
 		}
@@ -102,7 +103,7 @@ func (m *Model) historyView() string {
 		case paneContacts:
 			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, m.filtered(), m.selected, m.recipient.PhoneNumber, max(1, m.width-2), body, m.query, m.searching), Focused: true}
 		case paneThreads:
-			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body), Focused: true}
+			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body, threadThemes), Focused: true}
 		}
 		// TideUI's Tabbed mode reserves a compact header and shows the active pane.
 		layout.Mode = tideui.Tabbed

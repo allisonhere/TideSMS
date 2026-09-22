@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-func Threads(r tideui.Renderer, ts []domain.Thread, selected string, w, h int) string {
+// Threads renders the sidebar list. themeFor gives a thread's palette name,
+// keyed by thread id, so a row shows the colour its conversation will open in;
+// a thread absent from the map has no theme of its own.
+func Threads(r tideui.Renderer, ts []domain.Thread, selected string, w, h int, themeFor map[string]string) string {
 	if len(ts) == 0 {
 		return r.Styles.DetailMeta.Render("No cached threads yet.\nRefresh when your phone is online.")
 	}
@@ -37,7 +40,7 @@ func Threads(r tideui.Renderer, ts []domain.Thread, selected string, w, h int) s
 		// Leave room for the marker, the suffix and a gap, so a long participant
 		// list is elided rather than butting up against the timestamp.
 		name := ansi.Truncate(contacts.SafeLabel(t.DisplayName), max(1, w-len(mark)-ansi.StringWidth(suffix)-2), "…")
-		rows = append(rows, r.RenderRow(tideui.Row{Prefix: mark, Text: name, Suffix: suffix, Selected: t.ID == selected}, w), r.Styles.DetailMeta.Render(ansi.Truncate("  "+contacts.SafeLabel(t.LastMessage), w, "…")), "")
+		rows = append(rows, r.RenderRow(tideui.Row{Prefix: mark, Text: tinted(name, themeFor[t.ID], t.ID == selected), Suffix: suffix, Selected: t.ID == selected}, w), r.Styles.DetailMeta.Render(ansi.Truncate("  "+contacts.SafeLabel(t.LastMessage), w, "…")), "")
 	}
 	for len(rows) < h-1 {
 		rows = append(rows, "")
