@@ -15,7 +15,7 @@ The binary is built in this directory; nothing is installed system-wide. `./tide
 
 1. The app selects the only connected device with a loaded SMS plugin, or opens a device selector. Use **Ctrl+P → Switch device** to change it. The selector shows device ID, reachability, and SMS capability.
 2. Press **n** to start a message. That opens a search over your whole address book — your own contacts and everyone imported from the phone — and typing a full number offers that number directly, so an unknown recipient needs no separate step. Press **a** to save a contact. Phone numbers accept common formatting; an international prefix is recommended. No country code is guessed.
-3. TideSMS opens on the **Threads** pane, populated from the local cache before the phone answers. **Enter** opens a thread. **c** borrows the sidebar for the contact list, where **Enter** on a contact opens their thread if one exists, and **Esc** returns to threads.
+3. TideSMS opens on the **Threads** pane, populated from the local cache before the phone answers. **Enter** opens a thread and focuses the composer, so you can reply straight away. **c** borrows the sidebar for the contact list, where **Enter** on a contact opens their thread if one exists, and **Esc** returns to threads.
 4. Press **Enter** on a contact or thread, then compose. **Enter submits** and **Shift+Enter inserts a newline**; **Ctrl+Enter**, **F12** and **Ctrl+P → Send message** are equivalent explicit send actions. With `[composer] enter_sends = false`, Enter inserts a newline and those send instead.
 5. **Esc** leaves the composer (in Vim, **Alt+Esc** or a clean second **Esc**), returning to the conversation — or to the thread list when the recipient has no thread yet. Switching threads retains each thread's draft. Use **t** to change a contact's accent, or **Ctrl+P → Change thread theme** for this thread only.
 
@@ -84,7 +84,7 @@ A message that arrives in the thread you are looking at updates it silently. One
 | Contacts | ? / q | Help / save drafts and quit |
 | Threads | j/k, arrows | Move one thread |
 | Threads | g/G, Home/End | First/last thread |
-| Threads | Enter | Open the conversation |
+| Threads | Enter | Open the conversation and start typing (composer focused) |
 | Threads | r / c / n | Refresh conversations / contacts / new message |
 | Conversation | j/k, arrows | Select previous/next message |
 | Conversation | PgUp/PgDn, Ctrl+U/D | Scroll; near the top loads older history |

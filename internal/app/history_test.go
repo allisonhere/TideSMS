@@ -245,6 +245,29 @@ func openThreadByID(t *testing.T, d *driver, id string) {
 	if d.m.history.active == nil || d.m.history.active.ID != id {
 		t.Fatalf("thread %s did not open", id)
 	}
+	// Opening from the list focuses the composer; most tests then exercise
+	// conversation navigation, so hand focus to the conversation pane.
+	d.m.setPane(paneConversation)
+}
+
+// Opening a thread from the list drops the cursor into the composer so a reply
+// needs no extra keypress.
+func TestThreadListEnterOpensComposer(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	m.setPane(paneThreads)
+	m.history.threadSelected = amyThread
+	d.press("enter")
+	if m.history.active == nil || m.history.active.ID != amyThread {
+		t.Fatal("thread did not open")
+	}
+	if !m.focus || m.history.pane != paneComposer {
+		t.Fatalf("expected the composer, got focus=%v pane=%d", m.focus, m.history.pane)
+	}
+	typeText(m, "quick reply")
+	if m.editor.Value() != "quick reply" {
+		t.Fatalf("typing did not reach the draft: %q", m.editor.Value())
+	}
 }
 
 // selectSetting moves the static settings panel cursor to the row with the

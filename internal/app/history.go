@@ -577,7 +577,11 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			idx = 0
 		case "enter":
 			if t := m.selectedThread(); t != nil {
-				return m.openThread(*t)
+				cmd := m.openThread(*t)
+				// Opening from the thread list drops straight into the
+				// composer, so a reply needs no separate "r".
+				m.setPane(paneComposer)
+				return cmd
 			}
 		case "r":
 			return m.startSession(true)
