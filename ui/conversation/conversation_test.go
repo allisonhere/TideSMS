@@ -437,11 +437,11 @@ func TestInlineMediaRendersHalfBlocks(t *testing.T) {
 		Width: 4, Height: 2, State: domain.AttachmentAvailable,
 	}}
 	inline := strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart", InlineMedia: true}), "\n")
-	if !strings.Contains(inline, "▀") {
-		t.Fatalf("no inline art:\n%s", ansi.Strip(inline))
+	if !strings.ContainsFunc(inline, func(r rune) bool { return r >= 0x2800 && r <= 0x28FF }) {
+		t.Fatalf("no inline braille art:\n%s", ansi.Strip(inline))
 	}
 	block := strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart"}), "\n")
-	if strings.Contains(block, "▀") {
+	if strings.ContainsFunc(block, func(r rune) bool { return r >= 0x2800 && r <= 0x28FF }) {
 		t.Fatal("inline art drawn when disabled")
 	}
 	if !strings.Contains(ansi.Strip(block), "[ image:") {

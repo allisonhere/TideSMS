@@ -283,6 +283,124 @@ func clampRange(v, lo, hi int) (int, int) {
 	return v, min(v+1, hi)
 }
 
+// BrailleImage renders an image with braille dots: each cell holds a 2x4 grid
+// of sub-pixels, eight times the detail of half-blocks for the same footprint.
+// It is monochrome per cell, tinted with the cell's average colour, which reads
+// far less blocky than large half-block cells.
+func BrailleImage(path string, maxCols, maxRows int) ([]string, bool) {
+	if path == "" || maxCols < 1 || maxRows < 1 {
+		return nil, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return nil, false
+	}
+	key := "b|" + path + "|" + strconv.FormatInt(fi.ModTime().UnixNano(), 10) + "|" + strconv.Itoa(maxCols) + "x" + strconv.Itoa(maxRows)
+	if cached, ok := textCache.Load(key); ok {
+		return cached.([]string), true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, false
+	}
+	lines := brailleLines(img, maxCols, maxRows)
+	if len(lines) == 0 {
+		return nil, false
+	}
+	textCache.Store(key, lines)
+	return lines, true
+}
+
+// brailleBits maps a dot at (dx in 0..1, dy in 0..3) to its braille bit.
+var brailleBits = [2][4]rune{{0x01, 0x02, 0x04, 0x40}, {0x08, 0x10, 0x20, 0x80}}
+
+func brailleLines(img image.Image, maxCols, maxRows int) []string {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w < 1 || h < 1 {
+		return nil
+	}
+	cols := max(1, maxCols)
+	rows := cols * h / (2 * w)
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > maxRows {
+		rows = maxRows
+	}
+	lines := make([]string, 0, rows)
+	for cy := 0; cy < rows; cy++ {
+		var sb strings.Builder
+		lastColor := [3]uint8{}
+		colored := false
+		for cx := 0; cx < cols; cx++ {
+			var lum [2][4]float64
+			var sum [3]uint64
+			total := 0.0
+			for dx := 0; dx < 2; dx++ {
+				for dy := 0; dy < 4; dy++ {
+					r, g, bl := samplePixel(img, b, cx*2+dx, cy*4+dy, cols*2, rows*4)
+					l := 0.2126*float64(r) + 0.7152*float64(g) + 0.0722*float64(bl)
+					lum[dx][dy] = l
+					total += l
+					if l >= 128 {
+						sum[0] += uint64(r)
+						sum[1] += uint64(g)
+						sum[2] += uint64(bl)
+					}
+				}
+			}
+			mean := total / 8
+			bits := rune(0)
+			n := 0
+			for dx := 0; dx < 2; dx++ {
+				for dy := 0; dy < 4; dy++ {
+					if lum[dx][dy] >= mean && lum[dx][dy] >= 24 {
+						bits |= brailleBits[dx][dy]
+						n++
+					}
+				}
+			}
+			if bits == 0 {
+				sb.WriteRune(' ')
+				continue
+			}
+			color := lastColor
+			if n > 0 {
+				color = [3]uint8{uint8(sum[0] / uint64(n)), uint8(sum[1] / uint64(n)), uint8(sum[2] / uint64(n))}
+			}
+			if !colored || color != lastColor {
+				fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%dm", color[0], color[1], color[2])
+				lastColor, colored = color, true
+			}
+			sb.WriteRune(0x2800 + bits)
+		}
+		sb.WriteString("\x1b[0m")
+		lines = append(lines, sb.String())
+	}
+	return lines
+}
+
+// samplePixel maps a target pixel in a cols x rows grid onto the source, using
+// the source pixel nearest the mapped centre.
+func samplePixel(img image.Image, b image.Rectangle, px, py, cols, rows int) (uint8, uint8, uint8) {
+	x := b.Min.X + (px*b.Dx()+cols/2)/cols
+	y := b.Min.Y + (py*b.Dy()+rows/2)/rows
+	if x >= b.Max.X {
+		x = b.Max.X - 1
+	}
+	if y >= b.Max.Y {
+		y = b.Max.Y - 1
+	}
+	r, g, bl, _ := img.At(x, y).RGBA()
+	return uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8)
+}
+
 // ImageSize decodes just the header for width and height.
 func ImageSize(path string) (int, int, bool) {
 	f, err := os.Open(path)

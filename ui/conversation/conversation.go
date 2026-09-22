@@ -194,10 +194,10 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			// A local image can be drawn as text right here; anything else, or
 			// an image not yet downloaded, keeps the compact block.
 			if opts.InlineMedia {
-				// A glanceable inline size: big enough to recognise, small
-				// enough that a few images do not swallow the conversation.
-				// v opens the full-screen view for a closer look.
-				if lines, ok := media.TextImage(a.LocalPath, min(bw, 24), 10); ok {
+				// Braille dots pack 2x4 sub-pixels per cell, so the image keeps
+				// fine detail without a large footprint. v opens the full-screen
+				// view for a closer look.
+				if lines, ok := media.BrailleImage(a.LocalPath, min(bw, 24), 10); ok {
 					wrapped = append(wrapped, lines...)
 					continue
 				}

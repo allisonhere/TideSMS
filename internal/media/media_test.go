@@ -109,3 +109,17 @@ func TestTextImageRendersHalfBlocks(t *testing.T) {
 		t.Fatal("missing file should not render")
 	}
 }
+
+func TestBrailleImageRendersDots(t *testing.T) {
+	path := pngFile(t)
+	lines, ok := BrailleImage(path, 20, 5)
+	if !ok || len(lines) == 0 {
+		t.Fatalf("no braille: ok=%v lines=%d", ok, len(lines))
+	}
+	if !strings.ContainsFunc(lines[0], func(r rune) bool { return r >= 0x2800 && r <= 0x28FF }) {
+		t.Fatalf("no braille rune: %q", lines[0])
+	}
+	if _, ok := BrailleImage(filepath.Join(t.TempDir(), "missing.png"), 20, 5); ok {
+		t.Fatal("missing file should not render")
+	}
+}
