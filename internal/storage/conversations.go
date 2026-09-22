@@ -234,7 +234,21 @@ func (s *Store) Messages(thread string, limit int) ([]domain.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanMessages(rows)
+	out, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Attach media in one extra query rather than one per message.
+	byMessage, err := s.AttachmentsForThread(thread)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if atts, ok := byMessage[out[i].ID]; ok {
+			out[i].Attachments = atts
+		}
+	}
+	return out, nil
 }
 func (s *Store) Search(thread, query string) ([]domain.Message, error) {
 	rows, err := s.db.Query("SELECT "+messageColumns+" FROM messages WHERE thread_id=? AND instr(lower(body),lower(?))>0 ORDER BY timestamp DESC,id DESC LIMIT 1000", thread, query)

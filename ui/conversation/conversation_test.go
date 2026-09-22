@@ -390,3 +390,18 @@ func TestAttachmentBlockRenders(t *testing.T) {
 		}
 	}
 }
+
+// A media-only MMS shows its attachment block, not an empty-message placeholder.
+func TestMediaOnlyMessage(t *testing.T) {
+	msg := message(domain.Incoming, "")
+	msg.Attachments = []domain.Attachment{{
+		ID: "a1", MessageID: msg.ID, MIMEType: "image/png", State: domain.AttachmentMetadata,
+	}}
+	joined := ansi.Strip(strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart"}), "\n"))
+	if strings.Contains(joined, "[Empty message]") {
+		t.Fatalf("media-only message showed the empty placeholder:\n%s", joined)
+	}
+	if !strings.Contains(joined, "[ image: image ]") {
+		t.Fatalf("attachment block missing:\n%s", joined)
+	}
+}

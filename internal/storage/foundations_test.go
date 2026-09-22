@@ -289,6 +289,11 @@ func TestAttachmentsAndThreadState(t *testing.T) {
 	if err != nil || len(byThread["m1"]) != 1 {
 		t.Fatalf("thread attachments = %+v err=%v", byThread, err)
 	}
+	// The conversation reads messages, so attachments must come back with them.
+	msgs, err := s.Messages(thread, 10)
+	if err != nil || len(msgs) != 1 || len(msgs[0].Attachments) != 1 {
+		t.Fatalf("message attachments = %+v err=%v", msgs, err)
+	}
 	if err := s.SetAttachmentState("a1", domain.AttachmentAvailable, "/tmp/dinner.jpg"); err != nil {
 		t.Fatal(err)
 	}

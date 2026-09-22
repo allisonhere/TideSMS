@@ -157,7 +157,9 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		}
 		label := sender + " · " + stamp
 		body := Safe(msg.Body)
-		if body == "" {
+		// A media-only message has no text; the attachment block is its
+		// content, so the empty-body placeholder would be misleading.
+		if body == "" && len(msg.Attachments) == 0 {
 			body = "[Empty message]"
 		}
 		// Every bubble reserves the selection marker, its own gutter and a right
@@ -179,7 +181,10 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		if opts.MaxWidth > 0 {
 			bw = max(1, min(bw, opts.MaxWidth))
 		}
-		wrapped := strings.Split(ansi.Wrap(body, max(1, bw), ""), "\n")
+		var wrapped []string
+		if body != "" {
+			wrapped = strings.Split(ansi.Wrap(body, max(1, bw), ""), "\n")
+		}
 		// Attachments render as a compact block after the body, so media never
 		// blocks the conversation and needs no local file to be listed.
 		for _, a := range msg.Attachments {
