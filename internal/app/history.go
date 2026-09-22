@@ -223,43 +223,49 @@ func (m *Model) selectedThread() *domain.Thread {
 	return nil
 }
 
-// threadThemes maps each thread to the palette its row should show: the
-// thread's own override when it has one, otherwise the theme of the contact it
-// belongs to. A group has no single contact, so it shows only an explicit
-// thread theme.
+// threadThemes maps each thread to the palette its row should show.
+//
+// A conversation palette is preferred to a bubble palette, and within each the
+// thread's own setting beats the contact's: a row says "the colours this
+// conversation opens in", and the whole-conversation theme describes that
+// better than the tint of one side's messages. A contact given only a bubble
+// palette still gets a row colour, since that is just as much their colour.
+// ThemeOut is never used — it is the colour of your own messages in their
+// thread, not a mark of who they are.
+//
+// A group belongs to no single contact, so it takes only its own settings
+// rather than borrowing one member's.
 //
 // Without this a theme set on a contact was visible only once their
 // conversation was open, which made the sidebar no help at all in telling
 // people apart.
 func (m *Model) threadThemes() map[string]string {
-	out := make(map[string]string, len(m.history.threads))
-	byNumber := make(map[string]string, len(m.contacts))
+	type palette struct{ theme, bubbleIn string }
+	byNumber := make(map[string]palette, len(m.contacts))
 	for _, c := range m.contacts {
-		if c.Theme == "" {
+		if c.Theme == "" && c.ThemeIn == "" {
 			continue
 		}
-		byNumber[c.PhoneNumber] = c.Theme
+		p := palette{theme: c.Theme, bubbleIn: c.ThemeIn}
+		byNumber[c.PhoneNumber] = p
 		if key := contacts.MatchKey(c.PhoneNumber); key != "" {
-			byNumber[key] = c.Theme
+			byNumber[key] = p
 		}
 	}
+	out := make(map[string]string, len(m.history.threads))
 	for _, t := range m.history.threads {
-		if t.ThemeID != "" {
-			out[t.ID] = t.ThemeID
-			continue
-		}
-		if t.IsGroup || len(t.Participants) != 1 {
-			continue
-		}
-		number := t.Participants[0].Number
-		if theme := byNumber[number]; theme != "" {
-			out[t.ID] = theme
-			continue
-		}
-		if key := contacts.MatchKey(number); key != "" {
-			if theme := byNumber[key]; theme != "" {
-				out[t.ID] = theme
+		var own palette
+		if !t.IsGroup && len(t.Participants) == 1 {
+			number := t.Participants[0].Number
+			own = byNumber[number]
+			if own == (palette{}) {
+				if key := contacts.MatchKey(number); key != "" {
+					own = byNumber[key]
+				}
 			}
+		}
+		if name := themes.First(t.ThemeID, own.theme, t.ThemeIn, own.bubbleIn); name != "" {
+			out[t.ID] = name
 		}
 	}
 	return out

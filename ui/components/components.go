@@ -50,7 +50,12 @@ func ContactList(r tideui.Renderer, items []contacts.Contact, selected int, acti
 		if items[i].Synced {
 			suffix = "⟲"
 		}
-		name := tinted(contacts.SafeLabel(items[i].Name), items[i].Theme, i == selected)
+		// A contact may have been given only a bubble palette, which is just as
+		// much their colour as a whole theme. ThemeOut is left out: that is the
+		// colour of your own messages in their thread, not a mark of who they
+		// are.
+		palette := themes.First(items[i].Theme, items[i].ThemeIn)
+		name := tinted(contacts.SafeLabel(items[i].Name), palette, i == selected)
 		rows = append(rows, r.RenderRow(tideui.Row{Prefix: prefix, Text: name, Suffix: suffix, Selected: i == selected}, w))
 	}
 	for len(rows) < visible {

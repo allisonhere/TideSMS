@@ -96,3 +96,16 @@ func Accent(name string) lipgloss.Color {
 	}
 	return Base(name).BorderFocus
 }
+
+// First returns the first of the given names that is a real theme, so a caller
+// can express a fallback order in one expression. It is what lets a row say
+// "this conversation's palette, or failing that its bubble palette" without
+// repeating the validity check at each step.
+func First(names ...string) string {
+	for _, name := range names {
+		if name != "" && Valid(name) {
+			return name
+		}
+	}
+	return ""
+}

@@ -151,3 +151,53 @@ func TestContactThemePreviewAppliesToItsOwnConversation(t *testing.T) {
 		t.Errorf("the preview did not reach its own conversation: want %q, got %q", preview, m.conversationTheme().Name)
 	}
 }
+
+// A row prefers a conversation palette to a bubble palette, and within each
+// the thread's own setting to the contact's. ThemeOut never colours a row: it
+// is your own messages in their thread, not a mark of who they are.
+func TestThreadThemeResolutionOrder(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.settle("threads", func() bool { return len(m.history.threads) > 0 })
+
+	const number = "+15550001"
+	m.contacts = []contacts.Contact{{ID: "c1", Name: "One", PhoneNumber: number}}
+	m.history.threads = []domain.Thread{{
+		ID: "t1", Participants: []domain.Participant{{Number: number}},
+	}}
+	thread := &m.history.threads[0]
+	contact := &m.contacts[0]
+
+	themeOf := func() string { return m.threadThemes()["t1"] }
+
+	if got := themeOf(); got != "" {
+		t.Fatalf("nothing set, got %q", got)
+	}
+
+	// An outgoing bubble palette alone colours nothing.
+	contact.ThemeOut, thread.ThemeOut = "gruvbox-dark", "gruvbox-dark"
+	if got := themeOf(); got != "" {
+		t.Errorf("an outgoing bubble palette coloured the row: %q", got)
+	}
+
+	// The contact's incoming bubble palette is the weakest thing that does.
+	contact.ThemeIn = "nord"
+	if got := themeOf(); got != "nord" {
+		t.Errorf("contact bubble palette: got %q, want nord", got)
+	}
+	// The thread's own bubble palette is more specific.
+	thread.ThemeIn = "dracula"
+	if got := themeOf(); got != "dracula" {
+		t.Errorf("thread bubble palette: got %q, want dracula", got)
+	}
+	// A whole-conversation theme beats any bubble palette.
+	contact.Theme = "rose-pine"
+	if got := themeOf(); got != "rose-pine" {
+		t.Errorf("contact theme should beat a bubble palette: got %q", got)
+	}
+	// And the thread's own theme beats the contact's.
+	thread.ThemeID = "tokyo-night"
+	if got := themeOf(); got != "tokyo-night" {
+		t.Errorf("thread theme should win outright: got %q", got)
+	}
+}

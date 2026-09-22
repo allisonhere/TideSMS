@@ -123,3 +123,27 @@ func TestThreadsTintFromTheSuppliedMap(t *testing.T) {
 		t.Error("a thread was tinted with no themes supplied")
 	}
 }
+
+// A contact given only a bubble palette is still their own colour, so the row
+// falls back to it. ThemeOut is excluded: that is the colour of your own
+// messages in their thread, not a mark of who they are.
+func TestContactListFallsBackToTheBubblePalette(t *testing.T) {
+	truecolor(t)
+	list := []contacts.Contact{
+		{Name: "Bubbled", PhoneNumber: "+1555000001", ThemeIn: "nord"},
+		{Name: "Outgoing only", PhoneNumber: "+1555000002", ThemeOut: "gruvbox-dark"},
+		{Name: "Both", PhoneNumber: "+1555000003", Theme: "rose-pine", ThemeIn: "nord"},
+	}
+	rows := strings.Split(ContactList(testRenderer(), list, -1, "", 40, 10, "", false), "\n")
+
+	if !strings.Contains(rows[0], sgrFor(t, "nord")) {
+		t.Errorf("a contact with only an incoming bubble palette was not tinted: %q", rows[0])
+	}
+	if strings.Contains(rows[1], sgrFor(t, "gruvbox-dark")) {
+		t.Errorf("an outgoing bubble palette coloured the contact's own row: %q", rows[1])
+	}
+	// The whole-conversation theme wins over the bubble palette.
+	if !strings.Contains(rows[2], sgrFor(t, "rose-pine")) || strings.Contains(rows[2], sgrFor(t, "nord")) {
+		t.Errorf("the bubble palette beat the conversation theme: %q", rows[2])
+	}
+}
