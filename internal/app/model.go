@@ -567,6 +567,8 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.notify("Could not open the file", true)
 		}
 		return m, nil
+	case attachmentFetchedMsg:
+		return m, m.applyFetchedAttachment(v)
 	case attachmentSavedMsg:
 		if v.err != nil {
 			m.notify("Could not save the file", true)

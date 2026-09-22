@@ -5,7 +5,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/domain"
 )
 
-const attachmentColumns = "id,message_id,mime,filename,size,local_path,remote_id,width,height,state"
+const attachmentColumns = "id,message_id,mime,filename,size,local_path,remote_id,part_id,width,height,state"
 
 // SaveAttachments upserts a message's media parts.
 func (s *Store) SaveAttachments(messageID string, atts []domain.Attachment) error {
@@ -35,7 +35,7 @@ func (s *Store) Attachments(messageID string) ([]domain.Attachment, error) {
 // AttachmentsForThread groups a thread's attachments by message id, so a
 // conversation can render them without a query per message.
 func (s *Store) AttachmentsForThread(thread string) (map[string][]domain.Attachment, error) {
-	rows, err := s.db.Query("SELECT a.id,a.message_id,a.mime,a.filename,a.size,a.local_path,a.remote_id,a.width,a.height,a.state FROM attachments a JOIN messages m ON m.id=a.message_id WHERE m.thread_id=? ORDER BY a.id", thread)
+	rows, err := s.db.Query("SELECT a.id,a.message_id,a.mime,a.filename,a.size,a.local_path,a.remote_id,a.part_id,a.width,a.height,a.state FROM attachments a JOIN messages m ON m.id=a.message_id WHERE m.thread_id=? ORDER BY a.id", thread)
 	if err != nil {
 		return nil, err
 	}
@@ -57,10 +57,10 @@ func (s *Store) SetAttachmentState(id string, state domain.AttachmentState, loca
 }
 
 func upsertAttachment(tx *sql.Tx, a domain.Attachment) error {
-	_, err := tx.Exec(`INSERT INTO attachments(id,message_id,mime,filename,size,local_path,remote_id,width,height,state)
- VALUES(?,?,?,?,?,?,?,?,?,?)
- ON CONFLICT(id) DO UPDATE SET mime=excluded.mime,filename=excluded.filename,size=excluded.size,remote_id=excluded.remote_id,width=excluded.width,height=excluded.height,state=excluded.state`,
-		a.ID, a.MessageID, a.MIMEType, a.Filename, a.Size, a.LocalPath, a.RemoteID, a.Width, a.Height, string(a.State))
+	_, err := tx.Exec(`INSERT INTO attachments(id,message_id,mime,filename,size,local_path,remote_id,part_id,width,height,state)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(id) DO UPDATE SET mime=excluded.mime,filename=excluded.filename,size=excluded.size,remote_id=excluded.remote_id,part_id=excluded.part_id,width=excluded.width,height=excluded.height,state=CASE WHEN excluded.local_path<>'' THEN excluded.state ELSE attachments.state END,local_path=CASE WHEN excluded.local_path<>'' THEN excluded.local_path ELSE attachments.local_path END`,
+		a.ID, a.MessageID, a.MIMEType, a.Filename, a.Size, a.LocalPath, a.RemoteID, a.PartID, a.Width, a.Height, string(a.State))
 	return err
 }
 
@@ -70,7 +70,7 @@ func scanAttachments(rows *sql.Rows) ([]domain.Attachment, error) {
 	for rows.Next() {
 		var a domain.Attachment
 		var state string
-		if err := rows.Scan(&a.ID, &a.MessageID, &a.MIMEType, &a.Filename, &a.Size, &a.LocalPath, &a.RemoteID, &a.Width, &a.Height, &state); err != nil {
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.MIMEType, &a.Filename, &a.Size, &a.LocalPath, &a.RemoteID, &a.PartID, &a.Width, &a.Height, &state); err != nil {
 			return nil, err
 		}
 		a.State = domain.AttachmentState(state)

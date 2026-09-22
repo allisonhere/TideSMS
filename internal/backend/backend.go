@@ -31,6 +31,12 @@ type MessagingBackend interface {
 	Send(context.Context, SendRequest) error
 }
 
+// AttachmentBackend is optional: a backend that can fetch a message part's
+// file. It returns a local path to the downloaded file.
+type AttachmentBackend interface {
+	FetchAttachment(ctx context.Context, device string, partID int64, uniqueIdentifier string) (string, error)
+}
+
 // ContactsBackend is optional: a backend that can import the phone's address
 // book as a read-only overlay. Imported entries never replace local contacts.
 type ContactsBackend interface {

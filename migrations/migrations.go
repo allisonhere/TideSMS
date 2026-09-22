@@ -34,3 +34,6 @@ var ParticipantIdentity string
 
 //go:embed 011_attachments_and_thread_state.sql
 var AttachmentsAndThreadState string
+
+//go:embed 012_attachment_part_id.sql
+var AttachmentPartID string

@@ -175,7 +175,7 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		hint = "Enter confirm · Esc cancel"
 	case "media":
 		title = m.mediaTitle()
-		body = m.mediaViewerLines() + "\n" + r.Styles.DetailMeta.Render("←/→ next · v preview · o open · s save · c copy path · Esc close")
+		body = m.mediaViewerLines() + "\n" + r.Styles.DetailMeta.Render("←/→ next · d download · v preview · o open · s save · c copy path · Esc close")
 		hint = "Esc close"
 	case "open-attachment":
 		title = "Open externally"

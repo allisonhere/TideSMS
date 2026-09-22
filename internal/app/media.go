@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/media"
 	tea "github.com/charmbracelet/bubbletea"
@@ -79,8 +80,72 @@ func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "s":
 		return m.saveAttachment()
+	case "d":
+		return m.fetchAttachment()
 	case "v":
 		m.toggleMediaPreview()
+	}
+	return nil
+}
+
+// attachmentFetchedMsg reports a downloaded attachment.
+type attachmentFetchedMsg struct {
+	id   string
+	path string
+	err  error
+}
+
+// fetchAttachment asks the backend for the file behind the current part, then
+// records it so preview, open and save become available.
+func (m *Model) fetchAttachment() tea.Cmd {
+	a, ok := m.currentAttachment()
+	if !ok {
+		return nil
+	}
+	if a.State == domain.AttachmentAvailable && a.LocalPath != "" {
+		m.notify("Already downloaded", false)
+		return nil
+	}
+	b, ok := m.backend.(backend.AttachmentBackend)
+	if !ok {
+		m.notify("This backend cannot fetch attachments", true)
+		return nil
+	}
+	ctx := m.ctx
+	device := m.deviceID
+	id := a.ID
+	partID := a.PartID
+	uid := a.RemoteID
+	m.notify("Downloading attachment…", false)
+	return func() tea.Msg {
+		path, err := b.FetchAttachment(ctx, device, partID, uid)
+		return attachmentFetchedMsg{id: id, path: path, err: err}
+	}
+}
+
+// applyFetchedAttachment records a downloaded part in memory and on disk.
+func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
+	if v.err != nil || v.path == "" {
+		m.notify("Could not fetch the attachment", true)
+		return nil
+	}
+	for i := range m.mediaAtts {
+		if m.mediaAtts[i].ID == v.id {
+			m.mediaAtts[i].LocalPath = v.path
+			m.mediaAtts[i].State = domain.AttachmentAvailable
+			if w, h, ok := media.ImageSize(v.path); ok {
+				m.mediaAtts[i].Width, m.mediaAtts[i].Height = w, h
+			}
+		}
+	}
+	m.notify("Attachment ready", false)
+	if s, ok := m.store.(interface {
+		SetAttachmentState(string, domain.AttachmentState, string) error
+	}); ok {
+		return func() tea.Msg {
+			_ = s.SetAttachmentState(v.id, domain.AttachmentAvailable, v.path)
+			return nil
+		}
 	}
 	return nil
 }
@@ -146,7 +211,7 @@ func (m *Model) mediaViewerLines() string {
 	if a.LocalPath != "" {
 		fmt.Fprintf(&b, "File: %s\n", a.LocalPath)
 	} else {
-		b.WriteString("No local copy: open or save is unavailable\n")
+		b.WriteString("No local copy: press d to download\n")
 	}
 	if m.graphics != media.None && m.graphics != media.Sixel && a.LocalPath != "" {
 		b.WriteString("v previews inline\n")

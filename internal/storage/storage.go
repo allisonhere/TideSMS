@@ -44,11 +44,11 @@ func Open(path string) (*Store, error) {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 11 {
+	if version > 12 {
 		return fail(fmt.Errorf("database belongs to a newer TideSMS version"))
 	}
 
-	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants, migrations.QueueAndPreferences, migrations.MessageSearch, migrations.BubbleThemes, migrations.QueueOfflineWait, migrations.ParticipantIdentity, migrations.AttachmentsAndThreadState} {
+	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants, migrations.QueueAndPreferences, migrations.MessageSearch, migrations.BubbleThemes, migrations.QueueOfflineWait, migrations.ParticipantIdentity, migrations.AttachmentsAndThreadState, migrations.AttachmentPartID} {
 		if version > v {
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/godbus/dbus/v5"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,12 +103,21 @@ func decodeMessage(device string, v dbus.Variant) (domain.Message, error) {
 	// Attachments are metadata-only until fetched; the message renders without
 	// waiting for them.
 	for _, a := range w.Attachments {
+		state := domain.AttachmentMetadata
+		local := a.Thumbnail
+		if local != "" {
+			if _, statErr := os.Stat(local); statErr == nil {
+				state = domain.AttachmentAvailable
+			}
+		}
 		m.Attachments = append(m.Attachments, domain.Attachment{
 			ID:        m.ID + ":" + strconv.FormatInt(a.PartID, 10),
 			MessageID: m.ID,
 			MIMEType:  a.MIME,
 			RemoteID:  a.Identifier,
-			State:     domain.AttachmentMetadata,
+			PartID:    a.PartID,
+			LocalPath: local,
+			State:     state,
 		})
 	}
 	return m, nil

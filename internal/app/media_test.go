@@ -80,6 +80,40 @@ func TestMediaViewerPreviewSaveAndOpen(t *testing.T) {
 	}
 }
 
+// Downloading fetches the part through the backend, records it, and enables
+// preview, open and save.
+func TestMediaDownloadUsesBackend(t *testing.T) {
+	path := tempPNG(t)
+	m, b, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	b.AttachmentPath = path
+	m.graphics = media.Kitty
+	m.mediaAtts = []domain.Attachment{{ID: "a1", MIMEType: "image/png", Filename: "pic.png", PartID: 12, RemoteID: "PART_x", State: domain.AttachmentMetadata}}
+	m.mediaIndex = 0
+	m.modal = "media"
+
+	cmd := m.fetchAttachment()
+	if cmd == nil {
+		t.Fatal("download produced no command")
+	}
+	if _, next := m.Update(cmd()); next != nil {
+		next()
+	}
+	if len(b.AttachmentCalls) != 1 || b.AttachmentCalls[0] != 12 {
+		t.Fatalf("backend calls = %v", b.AttachmentCalls)
+	}
+	if m.mediaAtts[0].State != domain.AttachmentAvailable || m.mediaAtts[0].LocalPath != path {
+		t.Fatalf("attachment not updated: %+v", m.mediaAtts[0])
+	}
+	if m.mediaAtts[0].Width != 4 || m.mediaAtts[0].Height != 2 {
+		t.Fatalf("dimensions not read: %+v", m.mediaAtts[0])
+	}
+	m.mediaKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	if !m.mediaPreview {
+		t.Fatal("preview should work after download")
+	}
+}
+
 func TestMediaViewerWithoutLocalCopy(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)

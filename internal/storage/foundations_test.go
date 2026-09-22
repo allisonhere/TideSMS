@@ -270,7 +270,7 @@ func TestAttachmentsAndThreadState(t *testing.T) {
 	base := time.UnixMilli(1_700_000_000_000)
 	p := []domain.Participant{domain.ParticipantFor("+15551234567")}
 	thread := domain.ThreadID("phone", "amy")
-	att := domain.Attachment{ID: "a1", MIMEType: "image/jpeg", Filename: "dinner.jpg", Size: 1_800_000, RemoteID: "part-1", Width: 1920, Height: 1080, State: domain.AttachmentMetadata}
+	att := domain.Attachment{ID: "a1", MIMEType: "image/jpeg", Filename: "dinner.jpg", Size: 1_800_000, RemoteID: "part-1", PartID: 5295, Width: 1920, Height: 1080, State: domain.AttachmentMetadata}
 	if _, err := s.MergeMessages([]domain.Message{{
 		ID: "m1", DeviceID: "phone", ThreadID: thread, BackendID: "b1", Sender: "+15551234567",
 		Body: "look", Timestamp: base, Direction: domain.Incoming, Status: domain.Unknown,
@@ -282,7 +282,7 @@ func TestAttachmentsAndThreadState(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("attachments = %+v err=%v", list, err)
 	}
-	if list[0].MIMEType != "image/jpeg" || list[0].Filename != "dinner.jpg" || list[0].Size != 1_800_000 || list[0].State != domain.AttachmentMetadata {
+	if list[0].MIMEType != "image/jpeg" || list[0].Filename != "dinner.jpg" || list[0].Size != 1_800_000 || list[0].PartID != 5295 || list[0].State != domain.AttachmentMetadata {
 		t.Fatalf("attachment = %+v", list[0])
 	}
 	byThread, err := s.AttachmentsForThread(thread)

@@ -107,8 +107,10 @@ type Attachment struct {
 	ID, MessageID, MIMEType, Filename string
 	Size                              int64
 	LocalPath, RemoteID               string
-	Width, Height                     int
-	State                             AttachmentState
+	// PartID is the backend's part number, used to request the file.
+	PartID        int64
+	Width, Height int
+	State         AttachmentState
 }
 
 // HasMedia reports whether a message carries any attachment.

@@ -34,7 +34,11 @@ type Backend struct {
 	Contacts      []contacts.Synced
 	ContactsError error
 	ContactCalls  int
-	subs          map[chan domain.Event]context.Context
+	// AttachmentPath is returned by FetchAttachment; empty means a missing file.
+	AttachmentPath  string
+	AttachmentError error
+	AttachmentCalls []int64
+	subs            map[chan domain.Event]context.Context
 }
 
 func New() *Backend {
@@ -90,6 +94,16 @@ func (b *Backend) SyncContacts(ctx context.Context, device string) ([]contacts.S
 	}
 	return append([]contacts.Synced{}, b.Contacts...), nil
 }
+func (b *Backend) FetchAttachment(_ context.Context, _ string, partID int64, _ string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.AttachmentCalls = append(b.AttachmentCalls, partID)
+	if b.AttachmentError != nil {
+		return "", b.AttachmentError
+	}
+	return b.AttachmentPath, nil
+}
+
 func (b *Backend) Send(ctx context.Context, r backend.SendRequest) error {
 	b.mu.Lock()
 	delay, sendErr := b.SendDelay, b.SendError
