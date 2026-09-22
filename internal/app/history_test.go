@@ -1133,8 +1133,11 @@ func TestMessageBubblesToggleFromSettings(t *testing.T) {
 	if frames() {
 		t.Fatal("frames survived the toggle")
 	}
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "Are we still meeting") {
-		t.Fatalf("message text lost with frames off:\n%s", view)
+	// Check the conversation itself rather than the composited frame: the
+	// settings modal is an overlay, so how much of the thread it happens to
+	// cover says nothing about whether the thread still renders.
+	if conv := ansi.Strip(m.history.view.View(m.conversationRenderer(), false)); !strings.Contains(conv, "Are we still meeting") {
+		t.Fatalf("message text lost with frames off:\n%s", conv)
 	}
 	if m.history.active == nil || m.history.active.ID != amyThread {
 		t.Fatal("saving a setting closed the conversation")

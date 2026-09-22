@@ -84,8 +84,15 @@ type Model struct {
 	// themeCursor, contactCursor and the bubble cursors hold the value
 	// highlighted in the static settings panel before it is committed, so the
 	// theme previews live.
-	themeCursor            int
-	contactCursor          int
+	themeCursor      int
+	contactCursor    int
+	aiProviderCursor int
+	aiPolicyCursor   int
+	// settingEdit is the settings panel's inline text editor, used by the rows
+	// that are typed rather than cycled.
+	settingEdit            bool
+	settingEditing         settingID
+	settingInput           textinput.Model
 	bubbleInCursor         int
 	bubbleOutCursor        int
 	bubbleScope, bubbleDir string

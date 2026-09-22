@@ -178,8 +178,13 @@ func (m *Model) startAI(kind, instruction string) tea.Cmd {
 	if !m.loaded {
 		return nil
 	}
-	if m.assistant == nil {
-		m.notify("AI is not configured", true)
+	// Whether a provider exists is asked before whether the policy permits it.
+	// ProviderDisabled is not local, so a setup with no assistant at all used to
+	// fall out of the local-only branch and blame the privacy policy for a
+	// missing configuration.
+	provider := ai.Provider(m.cfg.AI.Provider)
+	if m.assistant == nil || !m.cfg.AI.Enabled || provider == ai.ProviderDisabled {
+		m.notify("AI is not configured — Ctrl+P → Open settings", true)
 		return nil
 	}
 	policy := m.aiPolicy()
@@ -187,9 +192,8 @@ func (m *Model) startAI(kind, instruction string) tea.Cmd {
 		m.notify("AI is off for this conversation", true)
 		return nil
 	}
-	provider := ai.Provider(m.cfg.AI.Provider)
 	if !ai.Allowed(policy, provider) {
-		m.notify("AI is local-only for this conversation", true)
+		m.notify("AI is local-only for this conversation; "+string(provider)+" is a cloud provider", true)
 		return nil
 	}
 	target := m.editor.Value()

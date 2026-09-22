@@ -307,6 +307,13 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		return m.contactDetailsKey(k)
 	case "media":
 		return m.mediaKey(k)
+	case "settings":
+		// A row being typed into takes every key, Esc included: there Esc
+		// abandons the edit rather than closing the panel, so it has to be
+		// claimed before the shared Esc below closes every modal.
+		if m.settingEdit {
+			return m.settingsEditKey(k)
+		}
 	}
 	if k.String() == "esc" {
 		m.modal = ""
@@ -338,13 +345,18 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "settings":
-		// The static panel is one non-scrolling list: move, change, commit.
+		// The panel is one list: move, change, commit. It scrolls only when it
+		// outgrows the window, which the renderer decides.
 		fields := m.settingsFields()
 		switch k.String() {
 		case "up", "k", "ctrl+k":
 			m.choice = max(0, m.choice-1)
 		case "down", "j", "ctrl+j":
 			m.choice = min(len(fields)-1, m.choice+1)
+		case "home", "g":
+			m.choice = 0
+		case "end", "G":
+			m.choice = max(0, len(fields)-1)
 		case "left", "h":
 			m.settingsAdjust(-1)
 		case "right", "l":

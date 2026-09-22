@@ -10,6 +10,7 @@ import (
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/x/ansi"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -252,11 +253,38 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		title = "Settings"
 		fields := m.settingsFields()
 		idx := max(0, min(m.choice, len(fields)-1))
-		var rows []string
-		for i, f := range fields {
-			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: f.label, Suffix: m.settingsValue(f.id, i == idx), Selected: i == idx}, w-4))
+		// The panel grew past what a short window can hold, so it shows a slice
+		// around the selection rather than overflowing the modal. The window is
+		// only smaller than the list when it has to be.
+		visible := max(3, m.height-12)
+		first := 0
+		if len(fields) > visible {
+			first = min(max(0, idx-visible/2), len(fields)-visible)
 		}
-		body = strings.Join(rows, "\n") + "\n\n" + r.Styles.DetailMeta.Render("↑↓ move · ←→ change · Enter toggle · Esc close") + "\n" + m.configPath
+		last := min(len(fields), first+visible)
+		var rows []string
+		if first > 0 {
+			rows = append(rows, r.Styles.DetailMeta.Render("↑ "+strconv.Itoa(first)+" more"))
+		}
+		for i := first; i < last; i++ {
+			f := fields[i]
+			suffix := m.settingsValue(f.id, i == idx)
+			if m.settingEdit && i == idx {
+				suffix = m.settingInput.View()
+			}
+			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: f.label, Suffix: suffix, Selected: i == idx}, w-4))
+		}
+		if last < len(fields) {
+			rows = append(rows, r.Styles.DetailMeta.Render("↓ "+strconv.Itoa(len(fields)-last)+" more"))
+		}
+		body = strings.Join(rows, "\n")
+		// Say what is wrong with the AI configuration here, where it can be
+		// fixed, rather than leaving it to surface later as a refusal that
+		// names the privacy policy instead of the setting at fault.
+		if notice := m.aiSettingsNotice(); notice != "" {
+			body += "\n\n" + r.Styles.StatusError.Render(ansi.Truncate(notice, w-4, "…"))
+		}
+		body += "\n\n" + r.Styles.DetailMeta.Render(m.settingsHint()) + "\n" + m.configPath
 	case "delete":
 		title = "Delete contact"
 		body = "Delete “" + m.editing.Name + "”?\nThe contact will be removed. Its draft is retained.\n"
