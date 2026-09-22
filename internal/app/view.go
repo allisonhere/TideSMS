@@ -80,7 +80,7 @@ func (m *Model) View() string {
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, right-2, "")
 	}
-	status := components.Status(m.currentDevice(), theme.Name, strings.ToUpper(m.cfg.Composer.Mode))
+	status := components.Status(m.currentDevice(), theme.Name, strings.ToUpper(m.cfg.Composer.Mode), m.outboxSuffix())
 	layout := tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, SidebarRatio: 0.28, Status: &status, Panes: [3]tideui.Pane{{Title: "Contacts", Hint: "/ search", Content: list, Focused: !m.focus, Accent: theme.BorderFocus}, {Title: title, Content: strings.Join(lines, "\n"), Focused: m.focus, Accent: theme.BorderFocus}}}
 	if m.modal != "" {
 		overlay := m.renderModal(r)
@@ -132,6 +132,57 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	case "thread-themes":
 		title = "Thread accent"
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "bubble-themes":
+		if m.bubbleDir == "out" {
+			title = "Outgoing bubble theme"
+		} else {
+			title = "Incoming bubble theme"
+		}
+		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "ai-policy":
+		title = "AI policy · " + m.aiPolicyName()
+		body = components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-14))
+		hint = "inherit falls back to the contact, then the global setting"
+	case "offline-send":
+		title = "Phone is offline"
+		device := "Your phone"
+		if d := m.currentDevice(); d != nil && d.Name != "" {
+			device = d.Name
+		}
+		body = "Queue this message for delivery when\n" + device + " reconnects?\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16))
+		hint = "Enter choose · Esc cancel"
+	case "schedule":
+		title = "Schedule message"
+		body = components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-14))
+		hint = "Enter choose · Esc cancel"
+	case "schedule-time":
+		title = "Schedule message"
+		body = "Date and time (YYYY-MM-DD HH:MM)\n\n" + m.schedInput.View()
+		hint = "Enter schedule · Esc cancel"
+	case "queue":
+		title = "Outgoing queue"
+		if len(m.outboxEntries) == 0 {
+			body = r.Styles.DetailMeta.Render("Nothing queued.") + "\n\n" + m.queueSummary()
+		} else {
+			body = components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16)) + "\n\n" + m.queueSummary()
+		}
+		hint = "Enter inspect · s send now · e edit · d remove · p pause · Esc close"
+	case "queue-item":
+		title = "Queued message"
+		body = m.renderQueueItem()
+		hint = "Esc back"
+	case "ai-review":
+		title = "AI writing review"
+		body = m.renderReview() + "\n" + m.renderReviewPreview()
+		hint = "a Accept · r Reject · e Edit · n/p Next/Prev · A Accept all · Esc Close"
+	case "ai-edit":
+		title = "Edit suggestion"
+		body = "Suggestion\n\n" + m.aiInput.View()
+		hint = "Enter save · Esc cancel"
+	case "ai-instruction":
+		title = "Custom rewrite"
+		body = "How should it be rewritten?\n\n" + m.aiInput.View()
+		hint = "Enter run · Esc cancel"
 	case "message":
 		title = "Message details"
 		if msg := m.history.view.Current(); msg != nil {
@@ -158,29 +209,24 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	case "themes":
 		title = "Contact accent · " + m.editing.Name
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
-	case "global-theme":
-		title = "Global theme"
-		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
 	case "settings":
 		title = "Settings"
-		bubbles := "off"
-		if m.cfg.Conversation.Bubbles {
-			bubbles = "on"
+		fields := m.settingsFields()
+		idx := max(0, min(m.choice, len(fields)-1))
+		var rows []string
+		for i, f := range fields {
+			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: f.label, Suffix: m.settingsValue(f.id, i == idx), Selected: i == idx}, w-4))
 		}
-		fill := "off"
-		if m.cfg.Conversation.FillBubbles {
-			fill = "on"
-		}
-		body = fmt.Sprintf("Theme: %s   Composer: %s\nBubbles: %s   Corners: %s   Fill: %s\nAI: reserved · not implemented\n\n", m.cfg.General.Theme, m.cfg.Composer.Mode, bubbles, m.cfg.Conversation.Corners, fill) + components.Choices(r, m.choices, m.choice, w-4, 4) + "\n\n" + m.configPath
+		body = strings.Join(rows, "\n") + "\n\n" + r.Styles.DetailMeta.Render("↑↓ move · ←→ change · Enter toggle · Esc close") + "\n" + m.configPath
 	case "delete":
 		title = "Delete contact"
 		body = "Delete “" + m.editing.Name + "”?\nThe contact will be removed. Its draft is retained.\n"
 		hint = "Enter delete · Esc cancel"
 	case "help":
 		title = "Keyboard shortcuts"
-		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nq Quit (saves drafts)\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Send\nEnter  New line   Alt+Esc  Leave composer\nEsc and Vim keys belong to Ripple\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
+		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nq Quit (saves drafts)\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Send\nEnter  New line   Esc  Leave composer\nCtrl+G  AI review    In Vim, Esc belongs to Ripple; Alt+Esc or a clean second Esc leaves\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
 		if m.history.enabled {
-			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Submit   Enter  New line\nAlt+Esc  History   Esc  Ripple Vim behavior\n\nq  Quit from navigation panes"
+			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Submit   Enter  New line\nEsc  Leave composer   Ctrl+G  AI review (Vim: Alt+Esc or double Esc)\n\nq  Quit from navigation panes"
 		}
 		hint = "↑↓ scroll · Esc close"
 	}

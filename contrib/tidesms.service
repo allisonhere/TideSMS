@@ -1,0 +1,15 @@
+[Unit]
+Description=TideSMS background sender
+Documentation=https://github.com/allisonhere/TideSMS
+# Only useful once a phone is paired with KDE Connect.
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Adjust the path if the daemon is installed somewhere else.
+ExecStart=%h/.local/bin/tidesms-daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

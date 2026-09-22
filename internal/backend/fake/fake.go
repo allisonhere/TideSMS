@@ -9,6 +9,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/domain"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Request records one history page the engine asked for, so tests can assert
@@ -18,11 +19,14 @@ type Request struct {
 	Query  domain.MessageQuery
 }
 type Backend struct {
-	mu            sync.Mutex
-	DeviceList    []backend.Device
-	ThreadList    []domain.Thread
-	History       map[string][]domain.Message
-	SendError     error
+	mu         sync.Mutex
+	DeviceList []backend.Device
+	ThreadList []domain.Thread
+	History    map[string][]domain.Message
+	SendError  error
+	// SendDelay simulates a slow transport; it is applied even when SendError
+	// is set, so tests can combine the two.
+	SendDelay     time.Duration
 	ThreadsError  error
 	Sent          []backend.SendRequest
 	Requests      []Request
@@ -88,12 +92,24 @@ func (b *Backend) SyncContacts(ctx context.Context, device string) ([]contacts.S
 }
 func (b *Backend) Send(ctx context.Context, r backend.SendRequest) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	delay, sendErr := b.SendDelay, b.SendError
+	b.mu.Unlock()
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.Sent = append(b.Sent, r)
-	return b.SendError
+	return sendErr
 }
 func (b *Backend) Subscribe(ctx context.Context, device string) (<-chan domain.Event, error) {
 	b.mu.Lock()

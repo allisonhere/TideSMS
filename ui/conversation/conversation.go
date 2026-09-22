@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	colorful "github.com/lucasb-eyer/go-colorful"
-	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -29,8 +28,11 @@ type Options struct {
 	// Names resolves a sender's number to their display name, keyed by both the
 	// normalized number and its national portion. Without it every incoming
 	// message is labelled with a bare number even when the contact is known.
-	Names             map[string]string
-	Timestamps, Query string
+	Names map[string]string
+	// Incoming and Outgoing are the surfaces for the two directions. A zero
+	// value derives the surface from the renderer's theme.
+	Incoming, Outgoing themes.Bubble
+	Timestamps, Query  string
 }
 type Model struct {
 	Messages                        []domain.Message
@@ -80,102 +82,17 @@ func (m Model) Current() *domain.Message {
 	return &v
 }
 
-const (
-	// outgoingTint is how far a sent message's fill moves from the background
-	// towards the accent. It is deliberately small: the foreground is chosen for
-	// the background, so a saturated fill would cost legibility.
-	outgoingTint = 0.22
-	tintStep     = 0.04
-	// minContrast is the WCAG AA ratio for body text. A theme whose own text sits
-	// below it is not held to a standard it does not meet itself; the fill only
-	// has to be no less legible than the background it replaces.
-	minContrast = 4.5
-	// contrastTolerance absorbs the rounding of the lightness-preserving blend.
-	contrastTolerance = 0.1
-)
-
-// fillColor gives the two directions different surfaces. Received messages sit
-// on the theme's raised surface; sent ones sit on the background tinted towards
-// the accent, which nearly every theme leaves identical to its status bar, so
-// there is no second surface to borrow.
-func fillColor(t tideui.Theme, direction domain.Direction) lipgloss.Color {
+// bubbleFor returns the configured palette for a message's direction, falling
+// back to the derived surface when the caller set none.
+func (o Options) bubbleFor(conv tideui.Theme, direction domain.Direction) themes.Bubble {
+	b := o.Incoming
 	if direction == domain.Outgoing {
-		if c, ok := readableTint(t.Bg, t.BorderFocus, t.Fg); ok {
-			return c
-		}
+		b = o.Outgoing
 	}
-	for _, c := range []lipgloss.Color{t.Overlay, t.StatusBar, t.Bg} {
-		if c != "" {
-			return c
-		}
+	if b.Fill == "" {
+		return themes.BubbleFor(conv, "", direction == domain.Outgoing)
 	}
-	return t.Bg
-}
-
-// readableTint blends as far towards the accent as the theme allows while
-// keeping text on the result legible, falling back to the gentlest tint when no
-// amount reaches the threshold.
-func readableTint(bg, accent, fg lipgloss.Color) (lipgloss.Color, bool) {
-	floor := math.Min(minContrast, contrastRatio(bg, fg)) - contrastTolerance
-	var last lipgloss.Color
-	for amount := outgoingTint; amount >= tintStep; amount -= tintStep {
-		c, ok := tint(bg, accent, amount)
-		if !ok {
-			return bg, false
-		}
-		if contrastRatio(c, fg) >= floor {
-			return c, true
-		}
-		last = c
-	}
-	if last == "" {
-		return bg, false
-	}
-	return last, true
-}
-
-// contrastRatio is the WCAG relative-luminance ratio between two colours.
-func contrastRatio(a, b lipgloss.Color) float64 {
-	x, err := colorful.Hex(string(a))
-	if err != nil {
-		return 0
-	}
-	y, err := colorful.Hex(string(b))
-	if err != nil {
-		return 0
-	}
-	lighter, darker := relativeLuminance(x), relativeLuminance(y)
-	if lighter < darker {
-		lighter, darker = darker, lighter
-	}
-	return (lighter + 0.05) / (darker + 0.05)
-}
-
-func relativeLuminance(c colorful.Color) float64 {
-	channel := func(v float64) float64 {
-		if v <= 0.03928 {
-			return v / 12.92
-		}
-		return math.Pow((v+0.055)/1.055, 2.4)
-	}
-	return 0.2126*channel(c.R) + 0.7152*channel(c.G) + 0.0722*channel(c.B)
-}
-
-// tint shifts base towards mix in hue and chroma while keeping base's
-// lightness, so the result is visibly different without costing the contrast the
-// theme chose for its text. It reports false when either colour is not hex.
-func tint(base, mix lipgloss.Color, amount float64) (lipgloss.Color, bool) {
-	from, err := colorful.Hex(string(base))
-	if err != nil {
-		return base, false
-	}
-	to, err := colorful.Hex(string(mix))
-	if err != nil {
-		return base, false
-	}
-	_, a, b := from.BlendLab(to, amount).Lab()
-	lightness, _, _ := from.Lab()
-	return lipgloss.Color(colorful.Lab(lightness, a, b).Clamped().Hex()), true
+	return b
 }
 
 // senderName prefers the resolved contact name over the raw address.
@@ -283,14 +200,20 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		// background.
 		filling := bubbles && opts.Fill
 		paint := func(s string) string { return s }
+		framePaint := paint
 		if filling {
-			style := lipgloss.NewStyle().
-				Background(fillColor(r.Styles.Theme, msg.Direction)).
-				Foreground(r.Styles.Theme.Fg)
+			bubble := opts.bubbleFor(r.Styles.Theme, msg.Direction)
+			style := lipgloss.NewStyle().Background(bubble.Fill).Foreground(bubble.Text)
 			paint = func(s string) string { return tideui.StyleOver(style, s) }
+			framePaint = paint
+			if bubble.Frame != "" {
+				// A chosen theme may colour the frame differently from the body.
+				frameStyle := lipgloss.NewStyle().Background(bubble.Fill).Foreground(bubble.Frame)
+				framePaint = func(s string) string { return tideui.StyleOver(frameStyle, s) }
+			}
 		}
 		if bubbles {
-			m.lines = append(m.lines, pad+paint(r.Styles.Badge.Render(tl+strings.Repeat("─", content+2)+tr)))
+			m.lines = append(m.lines, pad+framePaint(r.Styles.Badge.Render(tl+strings.Repeat("─", content+2)+tr)))
 		}
 		for _, line := range wrapped {
 			// The trailing gap is measured before highlighting, which adds
@@ -307,7 +230,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			m.lines = append(m.lines, pad+paint(row))
 		}
 		if bubbles {
-			m.lines = append(m.lines, pad+paint(r.Styles.Badge.Render(bl+strings.Repeat("─", content+2)+br)))
+			m.lines = append(m.lines, pad+framePaint(r.Styles.Badge.Render(bl+strings.Repeat("─", content+2)+br)))
 		}
 		if msg.Direction == domain.Outgoing {
 			// The status sits against the same right edge as the sender and time,

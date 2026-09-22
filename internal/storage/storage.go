@@ -40,11 +40,11 @@ func Open(path string) (*Store, error) {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 5 {
+	if version > 8 {
 		return fail(fmt.Errorf("database belongs to a newer TideSMS version"))
 	}
 
-	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants} {
+	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants, migrations.QueueAndPreferences, migrations.MessageSearch, migrations.BubbleThemes} {
 		if version > v {
 			continue
 		}
@@ -64,12 +64,16 @@ func Open(path string) (*Store, error) {
 	if _, err = db.Exec("UPDATE messages SET status='unknown' WHERE status='sending'"); err != nil {
 		return fail(err)
 	}
-
+	// A queue row caught mid-send has the same uncertainty, so it is paused
+	// rather than re-sent automatically when the next process starts.
+	if _, err = db.Exec("UPDATE outgoing_queue SET state='paused', last_error='interrupted during send' WHERE state='sending'"); err != nil {
+		return fail(err)
+	}
 	return &Store{db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Contacts() ([]contacts.Contact, error) {
-	rows, err := s.db.Query("SELECT id,name,phone_number,theme FROM contacts ORDER BY name COLLATE NOCASE,id")
+	rows, err := s.db.Query("SELECT id,name,phone_number,theme,theme_in,theme_out FROM contacts ORDER BY name COLLATE NOCASE,id")
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +81,7 @@ func (s *Store) Contacts() ([]contacts.Contact, error) {
 	var out []contacts.Contact
 	for rows.Next() {
 		var c contacts.Contact
-		if err = rows.Scan(&c.ID, &c.Name, &c.PhoneNumber, &c.Theme); err != nil {
+		if err = rows.Scan(&c.ID, &c.Name, &c.PhoneNumber, &c.Theme, &c.ThemeIn, &c.ThemeOut); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -85,7 +89,7 @@ func (s *Store) Contacts() ([]contacts.Contact, error) {
 	return out, rows.Err()
 }
 func (s *Store) SaveContact(c contacts.Contact) error {
-	_, err := s.db.Exec("INSERT INTO contacts(id,name,phone_number,theme) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,phone_number=excluded.phone_number,theme=excluded.theme", c.ID, c.Name, c.PhoneNumber, c.Theme)
+	_, err := s.db.Exec("INSERT INTO contacts(id,name,phone_number,theme,theme_in,theme_out) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,phone_number=excluded.phone_number,theme=excluded.theme,theme_in=excluded.theme_in,theme_out=excluded.theme_out", c.ID, c.Name, c.PhoneNumber, c.Theme, c.ThemeIn, c.ThemeOut)
 	return err
 }
 

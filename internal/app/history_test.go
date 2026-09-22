@@ -246,6 +246,32 @@ func openThreadByID(t *testing.T, d *driver, id string) {
 		t.Fatalf("thread %s did not open", id)
 	}
 }
+
+// selectSetting moves the static settings panel cursor to the row with the
+// given label, failing if the panel does not offer it.
+func selectSetting(t *testing.T, m *Model, label string) {
+	t.Helper()
+	for i, f := range m.settingsFields() {
+		if f.label == label {
+			m.choice = i
+			return
+		}
+	}
+	t.Fatalf("setting %q not offered", label)
+}
+
+// pickChoice moves a modal's cursor to the entry with the given label.
+func pickChoice(t *testing.T, m *Model, want string) {
+	t.Helper()
+	for i, c := range m.choices {
+		if c == want {
+			m.choice = i
+			return
+		}
+	}
+	t.Fatalf("choice %q not offered in %v", want, m.choices)
+}
+
 func thread(t *testing.T, m *Model, id string) domain.Thread {
 	t.Helper()
 	for _, v := range m.history.threads {
@@ -725,6 +751,146 @@ func TestContactEditKeepsTheOpenThreadAndDraft(t *testing.T) {
 	}
 }
 
+// Leaving a compose for someone with no thread yet has no conversation to
+// return to, so it falls back to the thread list instead of an empty pane.
+func TestEscapeFromNewComposeFallsBackToThreads(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.m.setPane(paneThreads)
+	none := contacts.Contact{ID: "new", Name: "New Person", PhoneNumber: "+15550001111"}
+	m.choose(none)
+	if !m.focus || m.history.active != nil {
+		t.Fatalf("expected a focused composer with no thread: focus=%v active=%v", m.focus, m.history.active)
+	}
+	d.press("esc")
+	if m.history.pane != paneThreads {
+		t.Fatalf("esc from a new compose landed on pane %d, want the thread list", m.history.pane)
+	}
+}
+
+// The settings panel is one static list: a theme preview neither saves nor
+// closes on Esc, Enter commits, and a boolean toggle leaves the panel open.
+func TestSettingsPanelIsStaticAndNonDestructive(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.run(m.action("Open settings"))
+	if m.modal != "settings" {
+		t.Fatalf("settings did not open: %q", m.modal)
+	}
+	if f, ok := m.selectedSetting(); !ok || f.id != settingTheme {
+		t.Fatalf("first row should be Theme, got %+v", f)
+	}
+	before := m.cfg.General.Theme
+	m.settingsAdjust(1)
+	if m.cfg.General.Theme != before {
+		t.Fatal("cycling previewed by saving")
+	}
+	d.press("esc")
+	if m.modal != "" || m.cfg.General.Theme != before {
+		t.Fatalf("Esc did not discard the preview: modal=%q theme=%q", m.modal, m.cfg.General.Theme)
+	}
+
+	d.run(m.action("Open settings"))
+	m.settingsAdjust(1)
+	want := themes.Names[m.themeCursor]
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("theme saved", func() bool { return !m.busy && m.cfg.General.Theme == want })
+	if m.modal != "settings" {
+		t.Fatal("committing a theme closed the panel")
+	}
+
+	selectSetting(t, m, "Message bubbles")
+	was := m.cfg.Conversation.Bubbles
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("bubbles saved", func() bool { return !m.busy && m.cfg.Conversation.Bubbles != was })
+	if m.modal != "settings" {
+		t.Fatal("toggling a setting closed the panel")
+	}
+}
+
+// Bubble themes resolve global -> contact -> thread, preview from the settings
+// panel, and persist.
+func TestBubbleThemesFromSettingsAndPalette(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.settle("history", func() bool { return len(m.history.view.Messages) == 3 })
+
+	// The global incoming bubble theme is set from the static panel.
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Incoming bubbles")
+	for i := 0; i < len(contactThemeNames()) && m.settingsValue(settingBubbleIn, true) != "dracula"; i++ {
+		m.settingsAdjust(1)
+	}
+	if pal := m.bubblePalette(m.conversationTheme(), false); pal.Name != "dracula" {
+		t.Fatalf("preview palette = %q", pal.Name)
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("global bubble saved", func() bool { return !m.busy && m.cfg.Conversation.IncomingTheme == "dracula" })
+	saved, err := config.Load(m.configPath)
+	if err != nil || saved.Conversation.IncomingTheme != "dracula" {
+		t.Fatalf("not persisted: %+v err=%v", saved.Conversation, err)
+	}
+	d.press("esc")
+
+	// A contact override through the palette.
+	d.run(m.action("Change incoming bubble theme"))
+	if m.modal != "bubble-themes" {
+		t.Fatalf("picker modal = %q", m.modal)
+	}
+	pickChoice(t, m, "nord")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("contact bubble saved", func() bool { return !m.busy && m.recipient.ThemeIn == "nord" })
+	if pal := m.bubblePalette(m.conversationTheme(), false); pal.Name != "nord" {
+		t.Fatalf("contact override not used: %q", pal.Name)
+	}
+
+	// A thread override wins over the contact.
+	d.run(m.action("Change thread incoming bubble theme"))
+	if m.modal != "bubble-themes" {
+		t.Fatalf("thread picker modal = %q", m.modal)
+	}
+	pickChoice(t, m, "gruvbox-light")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("thread bubble saved", func() bool { return m.history.active != nil && m.history.active.ThemeIn == "gruvbox-light" })
+	if pal := m.bubblePalette(m.conversationTheme(), false); pal.Name != "gruvbox-light" {
+		t.Fatalf("thread override not used: %q", pal.Name)
+	}
+	// The outgoing direction is untouched.
+	if pal := m.bubblePalette(m.conversationTheme(), true); pal.Name != "" {
+		t.Fatalf("outgoing direction changed: %q", pal.Name)
+	}
+}
+
+// Settings offers the open contact's theme directly, so the accent can be
+// changed without leaving the settings menu for the command palette.
+func TestContactThemeReachableFromSettings(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.run(m.action("Open settings"))
+	if m.modal != "settings" {
+		t.Fatalf("settings did not open: %q", m.modal)
+	}
+	selectSetting(t, m, "Contact theme")
+	// Cycle the inline value until it lands on nord, then commit.
+	for i := 0; i < len(contactThemeNames()) && m.settingsValue(settingContactTheme, true) != "nord"; i++ {
+		m.settingsAdjust(1)
+	}
+	if got := m.settingsValue(settingContactTheme, true); got != "nord" {
+		t.Fatalf("could not cycle to nord: %q", got)
+	}
+	if name := m.conversationRenderer().Styles.Theme.Name; name != "nord" {
+		t.Fatalf("contact theme did not preview: %q", name)
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("saved contact", func() bool { return !m.busy })
+	if name := m.conversationRenderer().Styles.Theme.Name; name != "nord" {
+		t.Fatalf("contact accent not applied: %q", name)
+	}
+}
+
 // The contact list is hidden until it is wanted: the sidebar shows threads, and
 // c swaps it in, Esc swaps it back, without disturbing the open conversation.
 func TestContactsPaneAppearsOnlyWhenRequested(t *testing.T) {
@@ -827,11 +993,7 @@ func TestMessageBubblesToggleFromSettings(t *testing.T) {
 	if m.modal != "settings" {
 		t.Fatalf("modal %q", m.modal)
 	}
-	for i, c := range m.choices {
-		if strings.Contains(c, "bubbles") {
-			m.choice = i
-		}
-	}
+	selectSetting(t, m, "Message bubbles")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("saved", func() bool { return !m.busy && !m.cfg.Conversation.Bubbles })
 	if frames() {
@@ -870,11 +1032,7 @@ func TestBubbleCornersToggleFromSettings(t *testing.T) {
 	}
 
 	d.run(m.action("Open settings"))
-	for i, c := range m.choices {
-		if strings.Contains(c, "corners") {
-			m.choice = i
-		}
-	}
+	selectSetting(t, m, "Bubble corners")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("square", func() bool { return !m.busy && m.cfg.Conversation.Corners == "square" })
 	if !drawn('┌') || drawn('╭') {
@@ -1015,16 +1173,19 @@ func TestThemePickersPreviewLive(t *testing.T) {
 		t.Error("the preview was saved without confirmation")
 	}
 
-	// The global picker previews the shell as well.
-	m.modal = "global-theme"
-	m.choices = append([]string{}, themes.Names...)
-	for i, c := range m.choices {
+	// The static settings panel previews the shell from its Theme row.
+	m.openSettings()
+	m.choice = 0
+	for i, c := range themes.Names {
 		if c == "gruvbox-light" {
-			m.choice = i
+			m.themeCursor = i
 		}
 	}
 	if got := m.renderer().Styles.Theme.Name; got != "gruvbox-light" {
-		t.Errorf("global picker does not preview the shell: %q", got)
+		t.Errorf("settings theme row does not preview the shell: %q", got)
+	}
+	if m.cfg.General.Theme == "gruvbox-light" {
+		t.Error("preview was saved without Enter")
 	}
 }
 
@@ -1047,11 +1208,7 @@ func TestBubbleFillToggleFromSettings(t *testing.T) {
 	}
 
 	d.run(m.action("Open settings"))
-	for i, c := range m.choices {
-		if strings.Contains(c, "fill") {
-			m.choice = i
-		}
-	}
+	selectSetting(t, m, "Bubble fill")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("unfilled", func() bool { return !m.busy && !m.cfg.Conversation.FillBubbles })
 	if filled() {

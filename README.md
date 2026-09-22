@@ -17,13 +17,13 @@ The binary is built in this directory; nothing is installed system-wide. `./tide
 2. Press **n** to start a message. That opens a search over your whole address book — your own contacts and everyone imported from the phone — and typing a full number offers that number directly, so an unknown recipient needs no separate step. Press **a** to save a contact. Phone numbers accept common formatting; an international prefix is recommended. No country code is guessed.
 3. TideSMS opens on the **Threads** pane, populated from the local cache before the phone answers. **Enter** opens a thread. **c** borrows the sidebar for the contact list, where **Enter** on a contact opens their thread if one exists, and **Esc** returns to threads.
 4. Press **Enter** on a contact or thread, then compose. **Alt+Enter** submits; **Enter alone always inserts a newline**. **Ctrl+Enter**, **F12** and **Ctrl+P → Send message** are equivalent explicit send actions.
-5. **Alt+Esc** returns to the conversation. Switching threads retains each thread's draft. Use **t** to change a contact's accent, or **Ctrl+P → Change thread theme** for this thread only.
+5. **Esc** leaves the composer (in Vim, **Alt+Esc** or a clean second **Esc**), returning to the conversation — or to the thread list when the recipient has no thread yet. Switching threads retains each thread's draft. Use **t** to change a contact's accent, or **Ctrl+P → Change thread theme** for this thread only.
 
 ## Conversations
 
 The layout is threads plus conversation from 70 columns up, and a single focused pane below that. The contact list is not a permanent third column: threads already carry resolved names, so the list shares the sidebar and appears only when you press **c**, with **Esc** returning to threads. That keeps the full remaining width for the conversation. **Tab** and **Shift+Tab** cycle panes and preserve each pane's selection and scroll position across width changes.
 
-A conversation shows date separators, an unread boundary, incoming and outgoing messages on opposite sides, the sender's resolved name, per-message timestamps, and the status of each outgoing message. Messages grow with the pane, keeping only a small gap on the opposite side so the two directions stay easy to tell apart; set `max_width` if you prefer a narrower measure on a very wide terminal. Each message is drawn in a frame, which **Ctrl+P → Open settings → Toggle message bubbles** turns off in favour of a single gutter bar, **Toggle bubble corners** switches between round and square, and **Toggle bubble fill** paints the inside of each frame. Received and sent messages fill differently: a received message sits on the theme's raised surface, a sent one on the background shifted towards the accent. All three settings persist. A pane too narrow to close a frame uses the bar regardless.
+A conversation shows date separators, an unread boundary, incoming and outgoing messages on opposite sides, the sender's resolved name, per-message timestamps, and the status of each outgoing message. Messages grow with the pane, keeping only a small gap on the opposite side so the two directions stay easy to tell apart; set `max_width` if you prefer a narrower measure on a very wide terminal. Each message is drawn in a frame, which **Ctrl+P → Open settings → Message bubbles** turns off in favour of a single gutter bar, **Bubble corners** switches between round and square, and **Bubble fill** paints the inside of each frame. Received and sent messages fill differently: a sent message sits on the theme's raised surface, a received one on the background shifted towards the accent. All three settings persist. A pane too narrow to close a frame uses the bar regardless.
 
 ```text
 David Queen · 07:24
@@ -97,12 +97,35 @@ A message that arrives in the thread you are looking at updates it silently. One
 | Any pane | Ctrl+P | Searchable command palette |
 | Composer | Alt+Enter | Submit SMS |
 | Composer | Ctrl+Enter / F12 | Submit SMS (equivalent) |
-| Composer | Alt+Esc | Leave composer |
-| Composer | Esc | Ripple's own Vim behavior |
+| Composer | Esc | Leave composer (Vim: Ripple owns Esc) |
+| Composer | Alt+Esc | Leave composer, always, including in Vim |
+| Composer | Ctrl+G | AI review of the draft (or the selection) |
+| Composer | Ctrl+Shift+Enter | Schedule the message (also Ctrl+P → Schedule message) |
 
-Ripple owns editor movement, wrapping, selection, copy/paste, multiline text, and undo/redo. Normal mode uses Shift+movement, Ctrl+arrows, Ctrl+C/X/V, and Ctrl+Z/Y. Vim mode supports Normal, Insert, Visual and Visual-line modes, motions/operators, and `u`/`Ctrl+R`. **Ctrl+C copies while the composer is focused.** App navigation never consumes ordinary Vim keys. Ripple's `:w`/`:q` intents do not submit or quit TideSMS; use the explicit application commands.
+Ripple owns editor movement, wrapping, selection, copy/paste, multiline text, and undo/redo. Normal mode uses Shift+movement, Ctrl+arrows, Ctrl+C/X/V, and Ctrl+Z/Y. Vim mode supports Normal, Insert, Visual and Visual-line modes, motions/operators, and `u`/`Ctrl+R`. **Ctrl+C copies while the composer is focused.** App navigation never consumes ordinary Vim keys. Ripple's `:q` intent leaves the composer; `:w` does not submit. Sending stays on the explicit application commands.
 
 **Alt+Enter**, **Ctrl+Enter** and **F12** all submit, and **Enter alone always inserts a newline**. Alt+Enter is the recommended default because window managers frequently bind Ctrl+Enter themselves; Hyprland, for instance, commonly claims it for spawning a terminal. Modified Enter requires a terminal that distinguishes it: TideSMS requests Kitty keyboard disambiguation and xterm modifyOtherKeys and handles their modified-key reports, and Alt+Enter also works through the plain ESC-prefixed form. Some terminals/multiplexers still collapse modified Enter; use F12 or the palette there. Protocol settings are restored on exit. At very small sizes the app asks for a terminal of at least 54×16; drafts are retained.
+
+## AI writing assistant
+
+The assistant is a reviewer, not a chat pane. It helps you write the message you already intend to send, and it never sends, chooses a recipient, or edits the draft silently.
+
+- **Ctrl+G** (or **Ctrl+P → AI: Review writing**) asks for spelling, grammar and punctuation corrections. Proposed changes open in a review modal: **a** Accept, **r** Reject, **e** Edit suggestion, **n**/**p** Next/Previous, **A** Accept all, **Esc** Close. Each change is shown individually, so a small correction reads as `their → there`.
+- Rewrite actions — **AI: Fix spelling**, **Fix grammar**, **Clean up**, **Make shorter**, **Make friendlier**, **Make professional**, **Make clearer** and **Custom rewrite…** — run against a Ripple selection when there is one, otherwise the whole draft.
+- Accepting a change replaces the text through Ripple's own edit path, so one undo (Vim `u`, or Ctrl+Z) restores exactly what was there before.
+- While a review is open, suggested spans are marked in the composer with an accent underline. Set `inline_marks = false` in `[ai]` (or leave it) to turn the marks off.
+- If the provider is unreachable, times out, or returns something malformed, the draft is left untouched and a notice says so. A request in flight is cancelled by starting another or leaving.
+
+Privacy is enforced per conversation. **Ctrl+P → Change AI policy** (contact) and **Change thread AI policy** (thread) choose `inherit`, `local`, `cloud` or `disabled`; a thread override beats a contact override, which beats `[ai] default_policy`. A `local` policy never falls back to a cloud provider — the request is refused instead. The assistant is only built when `[ai] enabled = true`, and message text is never logged.
+
+## Offline queue and scheduled send
+
+- Sending while the phone is offline offers **Queue for later**, **Keep draft** or **Cancel**. Queued messages live in SQLite and are sent oldest-first once the phone reconnects. Every attempt is guarded by an atomic claim, so a duplicate reconnect event cannot send the same message twice, and retries back off and stop at `[queue] max_attempts`.
+- **Ctrl+Shift+Enter**, or **Ctrl+P → Schedule message**, offers Send now, In 30 minutes, This evening, Tomorrow morning or a custom date/time. Scheduling stores an absolute instant: a scheduled message never leaves early because the phone reconnected.
+- **Ctrl+P → Open outgoing queue** lists queued and scheduled messages together. **Enter** inspects, **s** sends now, **e** loads it back into the composer, **d** removes it and **p** pauses or resumes a queued item.
+- The status bar shows `N queued` and `N scheduled` when either is non-zero.
+
+The queued, sending, sent, failed and paused states are persisted, and a message caught mid-send when the process dies is paused rather than retried blindly. The TUI drains the queue itself while it is open; the optional `tidesms-daemon` does the same while it is closed, and both share `internal/queue`, `internal/scheduler` and `internal/messaging`.
 
 ## Configuration and storage
 
@@ -122,7 +145,10 @@ sync_from_phone = true # import the phone's address book as a read-only overlay
 
 [notifications]
 enabled = true
+show_sender = true
 show_body = true # false announces "New SMS" without the text
+sound = false
+privacy = false  # true shows the sender only, never the contents
 
 [conversation]
 timestamps = "smart"        # or "full"
@@ -131,9 +157,12 @@ max_width = 0               # widest a message may grow; 0 uses the pane
 bubbles = true              # draw a frame around each message
 corners = "round"           # or "square"
 fill_bubbles = true         # paint the frame on the theme's raised surface
+incoming_theme = ""         # bubble palette for received messages; empty derives it
+outgoing_theme = ""         # bubble palette for sent messages; empty derives it
 
 [general]
 theme = "tide"
+compact_status = false
 
 [composer]
 mode = "normal" # or "vim"
@@ -141,14 +170,30 @@ mode = "normal" # or "vim"
 [kdeconnect]
 preferred_device = ""
 
+# The AI writer. Local providers need no cloud service. `default_policy` is the
+# privacy default for threads with no override: local, cloud or disabled.
 [ai]
-enabled = false # reserved; no AI functionality is implemented
+enabled = false
+provider = "disabled"     # ollama, lmstudio, openai, anthropic, deepseek, custom-openai-compatible
+endpoint = ""             # e.g. http://127.0.0.1:1234/v1 for LM Studio
+model = ""
+api_key = ""              # cloud providers only; never logged
+default_policy = "local"  # local, cloud or disabled
+inline_marks = true
+
+[queue]
+max_attempts = 5 # automatic retries before a message is left failed
+
+[scheduler]
+enabled = false # allows the optional background sender to run
 
 [logging]
 debug_content = false
 ```
 
-Use the command palette to toggle editing mode or open settings and choose the global theme. Themes are TideUI's own palettes — Catppuccin (Mocha, Latte, Frappé, Macchiato), Nord, Dracula, Gruvbox (dark and light), Tokyo Night (and Day), Rosé Pine (and Moon, Dawn), One Dark, Magenta Geode, Coral Sunset, Lavender Fields Forever, VT100 and VT52 — and any of them can be assigned to an individual contact with **t**, or to a thread with **Ctrl+P → Change thread theme**.
+**Ctrl+P → Open settings** shows a single static panel: every option is one row, and **↑↓** moves between rows, **←→** cycles the theme rows with a live preview, and **Enter** toggles or commits the selected row. Nothing opens a submenu. Themes are TideUI's own palettes — Catppuccin (Mocha, Latte, Frappé, Macchiato), Nord, Dracula, Gruvbox (dark and light), Tokyo Night (and Day), Rosé Pine (and Moon, Dawn), One Dark, Magenta Geode, Coral Sunset, Lavender Fields Forever, VT100 and VT52 — and any of them can be assigned to an individual contact with **t**, or to a thread with **Ctrl+P → Change thread theme**.
+
+Message bubbles can carry their own themes, one per direction, independent of the conversation pane. **Open settings → Incoming bubbles / Outgoing bubbles** sets the global defaults with a live preview; **Ctrl+P → Change incoming/outgoing bubble theme** (contact scope) and **Change thread incoming/outgoing bubble theme** (thread scope) set overrides. A bubble theme resolves **thread → contact → global**, and an empty value derives the surface from the conversation theme exactly as before. A chosen theme supplies its background, foreground and frame colour; if the fill would match the pane or fail the contrast floor, the derived surface is used instead so the text stays legible.
 
 Themes resolve global → contact → thread, and a contact's or thread's theme applies **only inside the conversation view**. The thread list, contact list, status bar and modals always stay on the global theme, so moving between people recolours the conversation and its border without repainting the interface around it. An explicit theme is used whole there — background, foreground and accent — so the conversation pane is painted in that palette while the panes beside it keep the global one.
 
@@ -156,7 +201,20 @@ Every theme picker previews as you move through it: the conversation repaints un
 
 The palette is context-sensitive and adds **Search current thread**, **Refresh conversations**, **Change thread theme**, **Mark thread unread**, **Copy phone number**, **Open contact**, **Jump to newest** and **Sync phone contacts** while conversations are available.
 
-SQLite migrations run transactionally on startup. Threads, participants, messages and per-thread sync state live in the same database, indexed on `messages(thread_id, timestamp)`, `messages(device_id, thread_id, backend_id)` and `threads(device_id, last_timestamp)`. The database is the only source the interface renders from, so navigation stays fast while the phone is slow or absent.
+### Background sending
+
+`tidesms-daemon` drains the outgoing queue and releases scheduled messages without the terminal interface running. It shares the same database, backend and messaging packages as the TUI, so delivery rules are not duplicated. Run it with the same `--config`, `--database` and `--log` paths, or install the optional user service (never enabled automatically):
+
+```sh
+install -Dm755 tidesms-daemon ~/.local/bin/tidesms-daemon
+install -Dm644 contrib/tidesms.service ~/.config/systemd/user/tidesms.service
+systemctl --user daemon-reload
+systemctl --user enable --now tidesms.service
+```
+
+`tidesms-daemon --once` processes the queue a single time and exits, which is useful for a timer or for testing.
+
+SQLite migrations run transactionally on startup. Threads, participants, messages and per-thread sync state live in the same database, indexed on `messages(thread_id, timestamp)`, `messages(device_id, thread_id, backend_id)` and `threads(device_id, last_timestamp)`. The database is the only source the interface renders from, so navigation stays fast while the phone is slow or absent. Milestone 3 adds tables for the outgoing queue, scheduled messages, AI and notification preferences, and contact sources, plus an FTS5 index over message bodies (`message_fts`) wired with triggers so search never scans the message table.
 
 Contact IDs are independent of phone numbers. Drafts are keyed by thread once a thread exists, and by normalized number before that; a draft written against a number is carried into that person's thread the first time it is opened, and only for an unambiguous one-person thread. Changing a contact's number never transfers its old draft to the new number. Deleting a contact retains its draft, recoverable by entering its number again.
 

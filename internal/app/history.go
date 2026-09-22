@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/contacts"
@@ -26,6 +25,7 @@ type historyStore interface {
 	MarkRead(string, []string) error
 	MarkUnread(string) error
 	ThreadTheme(string, string) error
+	ThreadBubbleThemes(string, string, string) error
 	MessageStatus(string, domain.Status) error
 }
 
@@ -232,7 +232,8 @@ func (m *Model) layoutConversation() {
 			}
 		}
 	}
-	m.history.view.Layout(m.conversationRenderer(), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Names: names, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
+	conv := m.conversationTheme()
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -276,16 +277,17 @@ func (m *Model) previewing(kinds ...string) (string, bool) {
 
 func (m *Model) renderer() tideui.Renderer {
 	name := m.cfg.General.Theme
-	if preview, ok := m.previewing("global-theme"); ok && preview != "" {
+	if preview, ok := m.settingsThemePreview(); ok && preview != "" {
 		name = preview
 	}
 	return tideui.NewRenderer(themes.Base(name), styleOptions)
 }
 
-// conversationRenderer draws the open conversation and nothing else. A contact's
-// or a thread's own theme applies here, so a person can have their own colours
-// without taking over the rest of the screen.
-func (m *Model) conversationRenderer() tideui.Renderer {
+// conversationTheme resolves the palette for the open conversation: a thread's
+// explicit theme wins, then the contact's, then the global one, with each picker
+// preview folded in. A conversation keeps its own colours without repainting the
+// shell around it.
+func (m *Model) conversationTheme() tideui.Theme {
 	identity := m.recipient.PhoneNumber
 	override := m.recipient.Theme
 	if t := m.history.active; t != nil {
@@ -298,13 +300,74 @@ func (m *Model) conversationRenderer() tideui.Renderer {
 		}
 	}
 	global := m.cfg.General.Theme
-	if preview, ok := m.previewing("global-theme"); ok && preview != "" {
+	if preview, ok := m.settingsThemePreview(); ok && preview != "" {
 		global = preview
 	}
 	if preview, ok := m.previewing("themes", "thread-themes"); ok {
 		override = preview
 	}
-	return tideui.NewRenderer(themes.Resolve(global, override, identity), styleOptions)
+	if preview, ok := m.settingsContactPreview(); ok {
+		override = preview
+	}
+	return themes.Resolve(global, override, identity)
+}
+
+func (m *Model) conversationRenderer() tideui.Renderer {
+	return tideui.NewRenderer(m.conversationTheme(), styleOptions)
+}
+
+// bubblePalette resolves a direction's message surface: a thread override beats
+// a contact override, which beats the global default, and an open picker
+// previews on top.
+func (m *Model) bubblePalette(conv tideui.Theme, outgoing bool) themes.Bubble {
+	name := ""
+	if t := m.history.active; t != nil {
+		if outgoing {
+			name = t.ThemeOut
+		} else {
+			name = t.ThemeIn
+		}
+	}
+	if name == "" {
+		if outgoing {
+			name = m.recipient.ThemeOut
+		} else {
+			name = m.recipient.ThemeIn
+		}
+	}
+	if name == "" {
+		if outgoing {
+			name = m.cfg.Conversation.OutgoingTheme
+		} else {
+			name = m.cfg.Conversation.IncomingTheme
+		}
+	}
+	if preview, ok := m.settingsBubblePreview(outgoing); ok {
+		name = preview
+	}
+	if preview, ok := m.bubblePickerPreview(outgoing); ok {
+		name = preview
+	}
+	return themes.BubbleFor(conv, name, outgoing)
+}
+
+// bubblePickerPreview reports the theme highlighted in the open scoped bubble
+// picker for one direction.
+func (m *Model) bubblePickerPreview(outgoing bool) (string, bool) {
+	if m.modal != "bubble-themes" {
+		return "", false
+	}
+	if (m.bubbleDir == "out") != outgoing {
+		return "", false
+	}
+	if m.choice < 0 || m.choice >= len(m.choices) {
+		return "", false
+	}
+	name := m.choices[m.choice]
+	if name == "automatic" || name == "inherit" {
+		return "", true
+	}
+	return name, true
 }
 func (m *Model) startSession(force bool) tea.Cmd {
 	h := &m.history
@@ -585,67 +648,10 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 	return m.markVisibleRead()
 }
 func (m *Model) sendHistory() tea.Cmd {
-	h := &m.history
-	if m.sending || !m.loaded {
+	if !m.prepareSend() {
 		return nil
 	}
-	if strings.TrimSpace(m.editor.Value()) == "" {
-		m.notify("Write a message before sending", true)
-		return nil
-	}
-	if h.active != nil && h.active.IsGroup {
-		m.notify("Group history is readable; group SMS sending is not supported by this backend", true)
-		return nil
-	}
-	if m.recipient.PhoneNumber == "" {
-		m.notify("Choose a recipient first", true)
-		return nil
-	}
-	if m.deviceID == "" {
-		m.notify("Choose a phone first", true)
-		return nil
-	}
-	if h.active != nil && h.active.DeviceID != m.deviceID {
-		m.notify("Select this thread’s phone before replying", true)
-		return nil
-	}
-	if h.active == nil {
-		t := domain.Thread{ID: domain.ThreadID(m.deviceID, "local-"+m.recipient.PhoneNumber), DeviceID: m.deviceID, Participants: []domain.Participant{domain.ParticipantFor(m.recipient.PhoneNumber)}, DisplayName: m.recipient.Name, LastTimestamp: time.Now()}
-		h.active = &t
-		m.drafts[t.ID] = m.drafts[m.recipient.PhoneNumber]
-	}
-	t := *h.active
-	key := m.draftKey()
-	draft := m.drafts[key]
-	draft.Body = m.editor.Value()
-	m.drafts[key] = draft
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		m.notify("Could not prepare message", true)
-		return nil
-	}
-	msg := domain.Message{ID: fmt.Sprintf("local-%x", id), DeviceID: t.DeviceID, ThreadID: t.ID, Sender: "You", Body: draft.Body, Timestamp: time.Now(), Direction: domain.Outgoing, Status: domain.Sending, Participants: t.Participants}
-	if h.retryID != "" {
-		msg.ID = h.retryID
-		h.retryID = ""
-	}
-	m.sending = true
-	m.editor.Focus(false)
-	m.notify("Sending…", false)
-	s := h.store
-	repo := m.store
-	return func() tea.Msg {
-		if err := repo.SaveDraft(key, draft); err != nil {
-			return outgoingMsg{message: msg, draftKey: key, draft: draft, err: err}
-		}
-		if _, err := s.MergeMessages([]domain.Message{msg}); err != nil {
-			return outgoingMsg{message: msg, draftKey: key, draft: draft, err: err}
-		}
-		if err := s.MessageStatus(msg.ID, domain.Sending); err != nil {
-			return outgoingMsg{message: msg, draftKey: key, draft: draft, err: err}
-		}
-		return outgoingMsg{message: msg, draftKey: key, draft: draft, err: nil}
-	}
+	return m.deliverPending()
 }
 
 func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
@@ -867,6 +873,27 @@ func (m *Model) historyAction(name string) (bool, tea.Cmd) {
 		m.modal = "thread-themes"
 		m.choice = 0
 		m.choices = append([]string{"inherit"}, themes.Names...)
+		return true, nil
+	case "Change thread incoming bubble theme":
+		if h.active == nil {
+			m.notify("Open a thread first", true)
+			return true, nil
+		}
+		m.openBubblePicker("thread", false)
+		return true, nil
+	case "Change thread outgoing bubble theme":
+		if h.active == nil {
+			m.notify("Open a thread first", true)
+			return true, nil
+		}
+		m.openBubblePicker("thread", true)
+		return true, nil
+	case "Change thread AI policy":
+		if h.active == nil {
+			m.notify("Open a thread first", true)
+			return true, nil
+		}
+		m.openAIPolicyPicker(storage.ScopeThread)
 		return true, nil
 	case "Mark thread unread":
 		if h.active == nil {

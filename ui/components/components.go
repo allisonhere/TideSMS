@@ -49,7 +49,7 @@ func Recipient(r tideui.Renderer, name, phone string) string {
 	}
 	return r.Styles.DetailTitle.Render("To: "+contacts.SafeLabel(name)) + "\n" + r.Styles.DetailMeta.Render(phone)
 }
-func Status(device *backend.Device, theme, mode string) tideui.StatusBar {
+func Status(device *backend.Device, theme, mode, extra string) tideui.StatusBar {
 	connection := "KDE Connect ○ No phone selected"
 	if device != nil {
 		if device.Connected {
@@ -58,7 +58,11 @@ func Status(device *backend.Device, theme, mode string) tideui.StatusBar {
 			connection = "KDE Connect ○ " + device.Name + " · offline"
 		}
 	}
-	return tideui.StatusBar{Left: connection, Right: theme + " | " + mode}
+	right := theme + " | " + mode
+	if extra != "" {
+		right += " | " + extra
+	}
+	return tideui.StatusBar{Left: connection, Right: right}
 }
 func Notification(r tideui.Renderer, text string, failed bool) string {
 	if failed {

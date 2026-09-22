@@ -128,6 +128,38 @@ func TestComposerOwnsVimKeysAndEnterNeverSends(t *testing.T) {
 		t.Fatal("Alt+Esc failed")
 	}
 }
+
+// In normal editing Esc has no editor meaning, so it leaves the composer and
+// keeps the draft; Vim keeps Esc for its own modes and leaves on a second one.
+func TestEscapeLeavesComposer(t *testing.T) {
+	m, _, _ := fixture(t)
+	m.choose(m.contacts[0])
+	typeText(m, "half-written")
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.focus {
+		t.Fatal("Esc did not leave the composer")
+	}
+	if m.editor.Value() != "half-written" {
+		t.Fatalf("Esc discarded the draft: %q", m.editor.Value())
+	}
+
+	m.cfg.Composer.Mode = "vim"
+	m.editor.SetMode("vim")
+	m.choose(m.contacts[0])
+	typeText(m, "i")
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.focus || m.editor.Mode() != "NORMAL" {
+		t.Fatalf("first Esc should reach Vim's Normal mode: focus=%v mode=%s", m.focus, m.editor.Mode())
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	for i := 0; cmd != nil && m.focus && i < 5; i++ {
+		_, cmd = m.Update(cmd())
+	}
+	if m.focus {
+		t.Fatal("second Esc did not leave the composer")
+	}
+}
+
 func TestPaletteSearchAndForm(t *testing.T) {
 	m, _, _ := fixture(t)
 	m.openPalette()

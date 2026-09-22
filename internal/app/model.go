@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"github.com/allisonhere/tidesms/internal/ai"
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/config"
 	"github.com/allisonhere/tidesms/internal/contacts"
@@ -27,6 +28,10 @@ type Repository interface {
 	SaveDraft(string, storage.Draft) error
 	SyncedContacts(string) ([]contacts.Synced, error)
 	ReplaceSyncedContacts(string, []contacts.Synced) error
+	// AIPolicy returns a stored per-contact or per-thread privacy override.
+	AIPolicy(scope, id string) (policy, provider, model string, ok bool, err error)
+	SetAIPolicy(scope, id, policy, provider, model string) error
+	ClearAIPolicy(scope, id string) error
 }
 type Model struct {
 	history                                         historyState
@@ -62,8 +67,31 @@ type Model struct {
 	fields                                          []textinput.Model
 	field                                           int
 	editing                                         contacts.Contact
-	sending                                         bool
-	sendPhone                                       string
+	// themeCursor, contactCursor and the bubble cursors hold the value
+	// highlighted in the static settings panel before it is committed, so the
+	// theme previews live.
+	themeCursor            int
+	contactCursor          int
+	bubbleInCursor         int
+	bubbleOutCursor        int
+	bubbleScope, bubbleDir string
+	policyScope            string
+	sending                bool
+	sendPhone              string
+	// assistant is the configured AI writer, or the null assistant when AI is
+	// off. The draft is never sent under a policy the provider does not satisfy.
+	assistant ai.WritingAssistant
+	aiCancel  context.CancelFunc
+	aiBusy    bool
+	aiEpoch   uint64
+	review    aiReviewState
+	aiInput   textinput.Model
+	// pending is a composed message awaiting send, queue or schedule.
+	pending        *pendingSend
+	outboxEntries  []outboxEntry
+	schedInput     textinput.Model
+	queuedCount    int
+	scheduledCount int
 	// notifier is replaced by tests; production always uses the desktop service.
 	notifier func(context.Context, string, string) error
 }
@@ -113,6 +141,13 @@ func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config
 	m := &Model{ctx: ctx, store: s, backend: b, cfg: c, configPath: path, log: log, editor: composer.New(c.Composer.Mode), drafts: map[string]storage.Draft{}, deviceID: c.KDEConnect.PreferredDevice, notifier: notifications.Show}
 	m.filter = textinput.New()
 	m.filter.CharLimit = 100
+	m.aiInput = textinput.New()
+	m.aiInput.CharLimit = 500
+	m.aiInput.Placeholder = "How should it be rewritten?"
+	m.schedInput = textinput.New()
+	m.schedInput.CharLimit = 32
+	m.schedInput.Placeholder = "YYYY-MM-DD HH:MM"
+	m.assistant = buildAssistant(c)
 	if startupError != nil {
 		m.configLocked = true
 		m.notify(startupError.Error(), true)
@@ -120,6 +155,16 @@ func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config
 	m.initHistory()
 	return m
 }
+
+// buildAssistant turns the resolved AI config into a provider. Disabled config
+// yields the null assistant, which refuses rather than calling anywhere.
+func buildAssistant(c config.Config) ai.WritingAssistant {
+	if !c.AI.Enabled {
+		return ai.Disabled{}
+	}
+	return ai.New(ai.Runtime{Provider: ai.Provider(c.AI.Provider), Endpoint: c.AI.Endpoint, Model: c.AI.Model, APIKey: c.AI.APIKey})
+}
+
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(func() tea.Msg {
 		if m.store == nil {
@@ -135,7 +180,7 @@ func (m *Model) Init() tea.Cmd {
 		}
 		ds, err := m.store.Drafts()
 		return loadedMsg{cs, sy, ds, err}
-	}, m.discover(), m.loadCache())
+	}, m.discover(), m.loadCache(), m.processQueue(), m.refreshCounts())
 }
 func (m *Model) notify(s string, failed bool) { m.notice = s; m.failed = failed }
 func (m *Model) discover() tea.Cmd {
@@ -300,6 +345,23 @@ func (m *Model) setFocus(on bool) {
 		}
 	}
 }
+
+// leaveComposer moves focus out of the editor and back to the conversation,
+// keeping the draft in place. A message to someone with no thread yet has no
+// conversation to return to, so it falls back to the thread list instead.
+func (m *Model) leaveComposer() tea.Cmd {
+	if m.history.enabled {
+		if m.history.active == nil {
+			m.setPane(paneThreads)
+			return nil
+		}
+		m.setPane(paneConversation)
+		return m.markVisibleRead()
+	}
+	m.setFocus(false)
+	return nil
+}
+
 func (m *Model) choose(c contacts.Contact) {
 	if m.history.enabled {
 		m.history.active = nil
@@ -413,7 +475,50 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if v.epoch != m.editorEpoch || !m.focus || m.modal != "" || m.sending {
 			return m, nil
 		}
+		if _, ok := v.msg.(composer.CancelMsg); ok {
+			return m, m.leaveComposer()
+		}
 		return m, m.updateEditor(v.msg)
+	case aiResultMsg:
+		m.handleAIResult(v)
+		return m, nil
+	case outboxChangedMsg:
+		if v.err != nil {
+			m.notify("Could not update the outbox", true)
+			return m, nil
+		}
+		if v.draftKey != "" {
+			d := m.drafts[v.draftKey]
+			if d.Revision == v.draft.Revision && d.Body == v.draft.Body {
+				d.Body = ""
+				d.Revision++
+				m.drafts[v.draftKey] = d
+				if m.draftKey() == v.draftKey {
+					m.editor.SetValue("")
+				}
+				return m, tea.Batch(m.saveDraft(v.draftKey, d), m.loadCache(), m.refreshCounts(), m.processQueue())
+			}
+		}
+		if v.scheduled {
+			m.notify("Scheduled for "+v.when.Local().Format("Jan 2 3:04 PM"), false)
+		} else if v.queued {
+			m.notify("Queued for delivery", false)
+		}
+		return m, tea.Batch(m.loadCache(), m.refreshCounts(), m.processQueue())
+	case queueProcessedMsg:
+		if v.err != nil && m.ctx.Err() == nil {
+			m.notify("Queue could not be processed", true)
+		} else if v.failed > 0 {
+			m.notify(fmt.Sprintf("%d queued message(s) failed", v.failed), true)
+		} else if v.sent > 0 {
+			m.notify(fmt.Sprintf("Sent %d queued message(s)", v.sent), false)
+		}
+		return m, tea.Batch(m.loadCache(), m.refreshCounts())
+	case countsMsg:
+		m.queuedCount, m.scheduledCount = v.queued, v.scheduled
+		return m, nil
+	case editOutboxMsg:
+		return m, tea.Batch(m.prepareEdit(v), m.refreshCounts())
 	case tea.WindowSizeMsg:
 		m.width = v.Width
 		m.height = v.Height
@@ -430,7 +535,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		m.synced = v.synced
 		m.drafts = v.drafts
 		m.loaded = true
-		return m, nil
+		return m, m.refreshCounts()
 	case contactsMsg:
 		if v.err != nil {
 			m.logError("contact sync", v.err)
@@ -461,7 +566,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				m.deviceID = online[0].ID
 				c := m.cfg
 				c.KDEConnect.PreferredDevice = m.deviceID
-				return m, tea.Batch(m.saveConfig(c), refreshTick(), m.startSession(false), m.loadCache(), m.maybeSyncContacts())
+				return m, tea.Batch(m.saveConfig(c), refreshTick(), m.startSession(false), m.loadCache(), m.maybeSyncContacts(), m.processQueue(), m.refreshCounts())
 			}
 			if m.deviceID == "" && len(v.devices) > 0 && !m.promptedDevices && m.modal == "" {
 				m.promptedDevices = true
@@ -471,7 +576,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				m.notify("No paired phones — pair Android in KDE Connect, then press r", true)
 			}
 		}
-		return m, tea.Batch(refreshTick(), m.startSession(false), m.maybeSyncContacts())
+		return m, tea.Batch(refreshTick(), m.startSession(false), m.maybeSyncContacts(), m.processQueue(), m.refreshCounts())
 	case refreshMsg:
 		if !m.discovering && !m.quitting {
 			return m, m.discover()
@@ -504,6 +609,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				m.deviceID = d
 			}
 			m.editor.SetMode(v.cfg.Composer.Mode)
+			m.assistant = buildAssistant(v.cfg)
 			if oldDevice != m.deviceID && m.history.enabled {
 				m.history.active = nil
 				m.history.view = conversation.New()
@@ -601,18 +707,24 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.openPalette()
 			return m, nil
 		}
+		// Ctrl+G reviews the draft. A pending request is cancelled first so a
+		// second press always reflects the current text.
+		if v.String() == "ctrl+g" {
+			m.cancelAI()
+			return m, m.startAI("review", "")
+		}
 		// Ctrl+Enter is commonly claimed by window managers, so Alt+Enter and
 		// F12 are equal first-class send keys rather than fallbacks.
 		if v.String() == "f12" || v.String() == "ctrl+enter" || v.String() == "alt+enter" {
 			return m, m.send()
 		}
+		// Scheduling is also on the palette; this supports terminals that can
+		// distinguish Ctrl+Shift+Enter.
+		if v.String() == "ctrl+shift+enter" {
+			return m, m.openSchedule()
+		}
 		if v.String() == "alt+esc" {
-			if m.history.enabled {
-				m.setPane(paneConversation)
-				return m, m.markVisibleRead()
-			}
-			m.setFocus(false)
-			return m, nil
+			return m, m.leaveComposer()
 		}
 		if v.String() == "tab" || v.String() == "shift+tab" {
 			m.cyclePane(v.String() == "shift+tab")
@@ -621,6 +733,11 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focus {
 			if m.sending {
 				return m, nil
+			}
+			// Plain editing has no use for Esc, so it leaves the composer. Vim
+			// keeps Esc for its modes, and leaves on a clean second Esc instead.
+			if v.String() == "esc" && m.cfg.Composer.Mode != "vim" {
+				return m, m.leaveComposer()
 			}
 			if m.recipient.PhoneNumber == "" && m.history.active == nil {
 				m.notify("Choose a recipient first · n for a number", true)

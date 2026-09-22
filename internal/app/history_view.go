@@ -74,7 +74,7 @@ func (m *Model) historyView() string {
 		lines[i] = tideui.StyleOver(paint, ansi.Truncate(line, cw, ""))
 	}
 	rightPane := tideui.Pane{Title: "Conversation", Hint: h.view.Position(), Content: strings.Join(lines, "\n"), Focused: h.pane == paneConversation || h.pane == paneComposer, Accent: cr.Styles.Theme.BorderFocus}
-	status := components.Status(m.currentDevice(), r.Styles.Theme.Name, m.editor.Mode())
+	status := components.Status(m.currentDevice(), r.Styles.Theme.Name, m.editor.Mode(), m.outboxSuffix())
 	status.Left += " | " + h.status
 	if d := m.currentDevice(); d != nil && !d.Connected {
 		status.Left = "KDE Connect ○ " + d.Name + " | Offline"

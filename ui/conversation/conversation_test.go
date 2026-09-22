@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
-	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -276,8 +275,8 @@ func TestBubbleFillPaintsOnlyTheFrame(t *testing.T) {
 	defer lipgloss.SetColorProfile(prev)
 
 	theme := themes.Resolve("tide", "", "")
-	received := background(fillColor(theme, domain.Incoming))
-	sent := background(fillColor(theme, domain.Outgoing))
+	received := background(themes.BubbleFor(theme, "", false).Fill)
+	sent := background(themes.BubbleFor(theme, "", true).Fill)
 	if received == "" || sent == "" || received == sent {
 		t.Fatalf("need two distinct fills, got %q and %q", received, sent)
 	}
@@ -327,34 +326,38 @@ func TestBubbleFillPaintsOnlyTheFrame(t *testing.T) {
 	}
 }
 
-// Received and sent messages must be told apart by colour, and the fill a sent
-// message sits on must be no harder to read than the background it replaces.
-// Nearly every theme leaves Overlay identical to StatusBar, so the second colour
-// is derived rather than borrowed.
-func TestFillDistinguishesDirectionWithoutCostingContrast(t *testing.T) {
-	for _, th := range tideui.BuiltinThemes {
-		in := fillColor(th, domain.Incoming)
-		out := fillColor(th, domain.Outgoing)
-		if in == out {
-			t.Errorf("%s: both directions fill with %s", th.Name, in)
+// A chosen bubble palette paints the fill and body it names, and the frame
+// glyphs carry the palette's frame colour.
+func TestExplicitBubbleThemePaintsItsPalette(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	conv := themes.Resolve("tide", "", "")
+	in := themes.BubbleFor(conv, "dracula", false)
+	out := themes.BubbleFor(conv, "gruvbox-light", true)
+	if in.Fill == "" || out.Fill == "" || in.Name != "dracula" || out.Name != "gruvbox-light" {
+		t.Fatalf("palette not built: in=%+v out=%+v", in, out)
+	}
+	msgs := []domain.Message{
+		message(domain.Incoming, "Are we still meeting around seven?"),
+		message(domain.Outgoing, "Yep, I'll be there."),
+	}
+	lines := renderOpts(t, msgs, 60, 20, Options{Timestamps: "smart", Bubbles: true, Fill: true, Incoming: in, Outgoing: out})
+	inFill, outFill := background(in.Fill), background(out.Fill)
+	if inFill == outFill {
+		t.Fatal("explicit fills should differ")
+	}
+	sawIn, sawOut := false, false
+	for _, line := range lines {
+		if strings.Contains(line, inFill) {
+			sawIn = true
 		}
-		if in != th.Overlay && th.Overlay != "" {
-			t.Errorf("%s: received messages should use the raised surface, got %s", th.Name, in)
-		}
-		baseline := contrastRatio(th.Bg, th.Fg)
-		floor := math.Min(minContrast, baseline) - contrastTolerance
-		if got := contrastRatio(out, th.Fg); got < floor {
-			t.Errorf("%s: sent fill contrast %.2f below %.2f (theme's own %.2f)", th.Name, got, floor, baseline)
+		if strings.Contains(line, outFill) {
+			sawOut = true
 		}
 	}
-}
-
-// A colour that cannot be parsed leaves the background untouched rather than
-// rendering something arbitrary.
-func TestTintRejectsUnparseableColours(t *testing.T) {
-	for _, tc := range [][2]lipgloss.Color{{"", "#ffffff"}, {"#1e1e2e", ""}, {"9", "#ffffff"}} {
-		if c, ok := tint(tc[0], tc[1], 0.2); ok || c != tc[0] {
-			t.Errorf("tint(%q,%q) = %q,%v", tc[0], tc[1], c, ok)
-		}
+	if !sawIn || !sawOut {
+		t.Fatalf("explicit bubble fills not drawn: in=%v out=%v", sawIn, sawOut)
 	}
 }

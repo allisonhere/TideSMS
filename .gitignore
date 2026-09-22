@@ -1,4 +1,5 @@
 /tidesms
+/tidesms-daemon
 *.db
 *.db-shm
 *.db-wal

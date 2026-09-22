@@ -39,7 +39,7 @@ func upsertThread(tx *sql.Tx, t domain.Thread) error {
 		if _, err = tx.Exec(`INSERT INTO drafts(recipient,body,revision) SELECT ?,body,revision FROM drafts WHERE recipient=? ON CONFLICT(recipient) DO NOTHING`, t.ID, local); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(`UPDATE threads SET theme=COALESCE((SELECT NULLIF(theme,'') FROM threads WHERE id=?),theme) WHERE id=? AND theme=''`, local, t.ID); err != nil {
+		if _, err = tx.Exec(`UPDATE threads SET theme=COALESCE((SELECT NULLIF(theme,'') FROM threads WHERE id=?),theme),theme_in=COALESCE((SELECT NULLIF(theme_in,'') FROM threads WHERE id=?),theme_in),theme_out=COALESCE((SELECT NULLIF(theme_out,'') FROM threads WHERE id=?),theme_out) WHERE id=? AND (theme='' OR theme_in='' OR theme_out='')`, local, local, local, t.ID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec("DELETE FROM threads WHERE id=?", local); err != nil {
@@ -119,7 +119,7 @@ func (s *Store) MergeMessages(messages []domain.Message) ([]domain.Message, erro
 	return added, nil
 }
 func (s *Store) Threads(device string) ([]domain.Thread, error) {
-	rows, err := s.db.Query(`SELECT t.id,t.device_id,t.backend_id,t.display_name,t.last_message,t.last_timestamp,t.theme,t.is_group,
+	rows, err := s.db.Query(`SELECT t.id,t.device_id,t.backend_id,t.display_name,t.last_message,t.last_timestamp,t.theme,t.theme_in,t.theme_out,t.is_group,
  MAX(t.unread_override,(SELECT COUNT(*) FROM messages m WHERE m.thread_id=t.id AND m.unread=1)) FROM threads t WHERE (?='' OR device_id=?) ORDER BY last_timestamp DESC,id`, device, device)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func (s *Store) Threads(device string) ([]domain.Thread, error) {
 	for rows.Next() {
 		var t domain.Thread
 		var ms int64
-		if err = rows.Scan(&t.ID, &t.DeviceID, &t.BackendID, &t.DisplayName, &t.LastMessage, &ms, &t.ThemeID, &t.IsGroup, &t.UnreadCount); err != nil {
+		if err = rows.Scan(&t.ID, &t.DeviceID, &t.BackendID, &t.DisplayName, &t.LastMessage, &ms, &t.ThemeID, &t.ThemeIn, &t.ThemeOut, &t.IsGroup, &t.UnreadCount); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -242,10 +242,26 @@ func (s *Store) ThreadTheme(thread, theme string) error {
 	_, err := s.db.Exec("UPDATE threads SET theme=? WHERE id=?", theme, thread)
 	return err
 }
+
+// ThreadBubbleThemes stores a thread's received and sent bubble palettes.
+// An empty string keeps the derived surface for that direction.
+func (s *Store) ThreadBubbleThemes(thread, in, out string) error {
+	_, err := s.db.Exec("UPDATE threads SET theme_in=?,theme_out=? WHERE id=?", in, out, thread)
+	return err
+}
 func (s *Store) MessageStatus(id string, status domain.Status) error {
 	_, err := s.db.Exec("UPDATE messages SET status=? WHERE id=? AND backend_id=''", status, id)
 	return err
 }
+
+// DeleteLocalMessage removes a message the phone never acknowledged, used when
+// the user discards a queued or failed local submission. Messages that came
+// from the phone are left alone.
+func (s *Store) DeleteLocalMessage(id string) error {
+	_, err := s.db.Exec("DELETE FROM messages WHERE id=? AND backend_id=''", id)
+	return err
+}
+
 func (s *Store) LastSync(thread string) (string, time.Time, error) {
 	var id string
 	var ms int64

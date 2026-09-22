@@ -22,6 +22,7 @@ type Status string
 const (
 	Unknown   Status = "unknown"
 	Queued    Status = "queued"
+	Scheduled Status = "scheduled"
 	Sending   Status = "sending"
 	Sent      Status = "sent"
 	Failed    Status = "failed"
@@ -63,10 +64,13 @@ func DedupeParticipants(ps []Participant) []Participant {
 
 type Thread struct {
 	ID, DeviceID, BackendID, DisplayName, LastMessage, ThemeID, LastBackendID string
-	Participants                                                              []Participant
-	LastTimestamp                                                             time.Time
-	UnreadCount                                                               int
-	IsGroup                                                                   bool
+	// ThemeIn and ThemeOut are this thread's received and sent bubble palettes.
+	// Empty keeps the derived surface.
+	ThemeIn, ThemeOut string
+	Participants      []Participant
+	LastTimestamp     time.Time
+	UnreadCount       int
+	IsGroup           bool
 }
 type Message struct {
 	ID, DeviceID, ThreadID, BackendID, Sender, Body string

@@ -5,13 +5,24 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/storage"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 )
 
-var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill"}
+var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages"}
+
+// historyCommands are the palette entries that only make sense with the
+// conversation view, so a plain compose session does not offer them.
+var historyCommands = map[string]bool{
+	"Search current thread": true, "Refresh conversations": true, "Change thread theme": true,
+	"Mark thread unread": true, "Copy phone number": true, "Open contact": true, "Jump to newest": true,
+	"Sync phone contacts": true, "Toggle message bubbles": true, "Toggle bubble corners": true,
+	"Toggle bubble fill": true, "Change thread incoming bubble theme": true, "Change thread outgoing bubble theme": true,
+	"Change thread AI policy": true,
+}
 
 func (m *Model) navigation(k tea.KeyMsg) tea.Cmd {
 	if k.String() == "q" || k.String() == "ctrl+c" {
@@ -166,6 +177,12 @@ func (m *Model) action(name string) tea.Cmd {
 	if ok, cmd := m.historyAction(name); ok {
 		return cmd
 	}
+	if cmd, ok := m.aiAction(name); ok {
+		return cmd
+	}
+	if cmd, ok := m.outboxAction(name); ok {
+		return cmd
+	}
 	if name == "Quit" {
 		m.modal = ""
 		return m.quit()
@@ -182,7 +199,7 @@ func (m *Model) action(name string) tea.Cmd {
 	case "Sync phone contacts":
 		m.modal = ""
 		return m.syncContacts(true)
-	case "Edit contact", "Delete contact", "Change contact theme":
+	case "Edit contact", "Delete contact", "Change contact theme", "Change incoming bubble theme", "Change outgoing bubble theme", "Change AI policy":
 		c, ok := m.selectedContact()
 		if m.focus && (m.recipient.ID != "" || m.recipient.Synced) {
 			c = m.recipient
@@ -208,6 +225,12 @@ func (m *Model) action(name string) tea.Cmd {
 			m.modal = "themes"
 			m.choice = 0
 			m.choices = append([]string{"automatic"}, themes.Names...)
+		case "Change incoming bubble theme":
+			m.openBubblePicker("contact", false)
+		case "Change outgoing bubble theme":
+			m.openBubblePicker("contact", true)
+		case "Change AI policy":
+			m.openAIPolicyPicker(storage.ScopeContact)
 		}
 	case "Switch device":
 		m.openDevices()
@@ -221,9 +244,7 @@ func (m *Model) action(name string) tea.Cmd {
 		m.modal = ""
 		return m.saveConfig(c)
 	case "Open settings":
-		m.modal = "settings"
-		m.choice = 0
-		m.choices = []string{"Global theme", "Toggle composer mode", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill"}
+		m.openSettings()
 	case "Toggle message bubbles":
 		c := m.cfg
 		c.Conversation.Bubbles = !c.Conversation.Bubbles
@@ -250,6 +271,24 @@ func (m *Model) action(name string) tea.Cmd {
 }
 func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 	if m.busy {
+		return nil
+	}
+	// The AI surfaces own Esc so closing a review also clears its markers.
+	switch m.modal {
+	case "ai-review":
+		return m.reviewKey(k)
+	case "ai-edit":
+		return m.editSuggestionKey(k)
+	case "ai-instruction":
+		return m.instructionKey(k)
+	case "schedule-time":
+		return m.scheduleTimeKey(k)
+	case "queue":
+		return m.queueKey(k)
+	case "queue-item":
+		if k.String() == "esc" || k.String() == "enter" || k.String() == "q" {
+			m.modal = "queue"
+		}
 		return nil
 	}
 	if k.String() == "esc" {
@@ -279,6 +318,22 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 			c := m.editing
 			m.busy = true
 			return func() tea.Msg { return mutationMsg{deleted: c.ID, err: m.store.DeleteContact(c.ID)} }
+		}
+		return nil
+	case "settings":
+		// The static panel is one non-scrolling list: move, change, commit.
+		fields := m.settingsFields()
+		switch k.String() {
+		case "up", "k", "ctrl+k":
+			m.choice = max(0, m.choice-1)
+		case "down", "j", "ctrl+j":
+			m.choice = min(len(fields)-1, m.choice+1)
+		case "left", "h":
+			m.settingsAdjust(-1)
+		case "right", "l":
+			m.settingsAdjust(1)
+		case "enter", " ":
+			return m.settingsActivate()
 		}
 		return nil
 	}
@@ -367,27 +422,14 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 			}
 			m.busy = true
 			return func() tea.Msg { return mutationMsg{contact: &c, err: m.store.SaveContact(c)} }
-		case "global-theme":
-			c := m.cfg
-			c.General.Theme = m.choices[m.choice]
-			m.modal = ""
-			return m.saveConfig(c)
-		case "settings":
-			switch m.choice {
-			case 0:
-				m.modal = "global-theme"
-				m.choices = append([]string{}, themes.Names...)
-				m.choice = 0
-				return nil
-			case 1:
-				return m.action("Toggle composer mode")
-			case 2:
-				return m.action("Toggle message bubbles")
-			case 3:
-				return m.action("Toggle bubble corners")
-			default:
-				return m.action("Toggle bubble fill")
-			}
+		case "bubble-themes":
+			return m.commitBubbleTheme(m.choices[m.choice])
+		case "ai-policy":
+			return m.commitAIPolicy(m.choices[m.choice])
+		case "offline-send":
+			return m.resolveOfflineSend(m.choices[m.choice])
+		case "schedule":
+			return m.resolveSchedule(m.choices[m.choice])
 		}
 	}
 	if m.modal == "compose" && k.String() != "up" && k.String() != "down" && k.String() != "ctrl+j" && k.String() != "ctrl+k" {
@@ -401,8 +443,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		m.filter, cmd = m.filter.Update(k)
 		m.choices = nil
 		_, syncable := m.backend.(backend.ContactsBackend)
-		for i, name := range commands {
-			if !m.history.enabled && i >= 10 {
+		for _, name := range commands {
+			if !m.history.enabled && historyCommands[name] {
 				continue
 			}
 			if name == "Sync phone contacts" && !syncable {

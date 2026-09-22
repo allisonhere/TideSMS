@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"github.com/allisonhere/tidesms/internal/ai"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"os"
 	"path/filepath"
@@ -15,8 +16,12 @@ type Config struct {
 		PageSize        int `toml:"page_size"`
 	} `toml:"sync"`
 	Notifications struct {
-		Enabled  bool `toml:"enabled"`
-		ShowBody bool `toml:"show_body"`
+		Enabled    bool `toml:"enabled"`
+		ShowSender bool `toml:"show_sender"`
+		ShowBody   bool `toml:"show_body"`
+		Sound      bool `toml:"sound"`
+		// Privacy shows the sender only, never the message contents.
+		Privacy bool `toml:"privacy"`
 	} `toml:"notifications"`
 	Contacts struct {
 		SyncFromPhone bool `toml:"sync_from_phone"`
@@ -28,10 +33,15 @@ type Config struct {
 		Bubbles            bool   `toml:"bubbles"`
 		Corners            string `toml:"corners"`
 		FillBubbles        bool   `toml:"fill_bubbles"`
+		// IncomingTheme and OutgoingTheme are the global bubble palettes for the
+		// two directions. Empty keeps the surface derived from the pane theme.
+		IncomingTheme string `toml:"incoming_theme"`
+		OutgoingTheme string `toml:"outgoing_theme"`
 	} `toml:"conversation"`
 
 	General struct {
-		Theme string `toml:"theme"`
+		Theme         string `toml:"theme"`
+		CompactStatus bool   `toml:"compact_status"`
 	} `toml:"general"`
 	Composer struct {
 		Mode string `toml:"mode"`
@@ -41,7 +51,28 @@ type Config struct {
 	} `toml:"kdeconnect"`
 	AI struct {
 		Enabled bool `toml:"enabled"`
+		// Provider is one of the values in ai.Providers (ollama, lmstudio, openai,
+		// anthropic, deepseek, custom-openai-compatible). "disabled" keeps the
+		// writer unavailable without discarding the rest of the settings.
+		Provider string `toml:"provider"`
+		Endpoint string `toml:"endpoint"`
+		Model    string `toml:"model"`
+		// APIKey is only needed by cloud providers. It is never logged.
+		APIKey string `toml:"api_key"`
+		// DefaultPolicy is the privacy default for threads without an override:
+		// "local", "cloud" or "disabled".
+		DefaultPolicy string `toml:"default_policy"`
+		// InlineMarks draws subtle markers under text the assistant flagged.
+		InlineMarks bool `toml:"inline_marks"`
 	} `toml:"ai"`
+	Queue struct {
+		// MaxAttempts caps automatic retries before a message is left failed.
+		MaxAttempts int `toml:"max_attempts"`
+	} `toml:"queue"`
+	Scheduler struct {
+		// Enabled permits the optional background sender to run.
+		Enabled bool `toml:"enabled"`
+	} `toml:"scheduler"`
 	Logging struct {
 		DebugContent bool `toml:"debug_content"`
 	} `toml:"logging"`
@@ -54,8 +85,13 @@ func Default() Config {
 	c.Sync.InitialMessages = 100
 	c.Sync.PageSize = 100
 	c.Notifications.Enabled = true
+	c.Notifications.ShowSender = true
 	c.Notifications.ShowBody = true
 	c.Contacts.SyncFromPhone = true
+	c.AI.Provider = string(ai.ProviderDisabled)
+	c.AI.DefaultPolicy = string(ai.PolicyLocal)
+	c.AI.InlineMarks = true
+	c.Queue.MaxAttempts = 5
 	c.Conversation.Timestamps = "smart"
 	c.Conversation.ShowDateSeparators = true
 	c.Conversation.MaxWidth = 0 // Use the pane.
@@ -91,8 +127,25 @@ func Load(path string) (Config, error) {
 	if c.Conversation.Corners != "round" && c.Conversation.Corners != "square" {
 		return Default(), fmt.Errorf("conversation corners must be round or square")
 	}
+	if !validThemeName(c.Conversation.IncomingTheme) || !validThemeName(c.Conversation.OutgoingTheme) {
+		return Default(), fmt.Errorf("conversation bubble themes must be empty or a known theme name")
+	}
+	if !ai.ValidProvider(c.AI.Provider) {
+		return Default(), fmt.Errorf("unknown ai provider %q", c.AI.Provider)
+	}
+	if !ai.ValidPolicy(c.AI.DefaultPolicy) {
+		return Default(), fmt.Errorf("ai default_policy must be local, cloud or disabled")
+	}
+	if c.AI.Enabled && c.AI.Provider != string(ai.ProviderDisabled) && c.AI.Model == "" {
+		return Default(), fmt.Errorf("ai model must be set when a provider is enabled")
+	}
+	if c.Queue.MaxAttempts < 1 || c.Queue.MaxAttempts > 50 {
+		return Default(), fmt.Errorf("queue max_attempts must be between 1 and 50")
+	}
 	return c, nil
 }
+func validThemeName(name string) bool { return name == "" || themes.Valid(name) }
+
 func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err

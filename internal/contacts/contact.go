@@ -10,8 +10,23 @@ import (
 // overlay entry: it has no local identity until the user edits or themes it.
 type Contact struct {
 	ID, Name, PhoneNumber, Theme string
-	Synced                       bool
+	// ThemeIn and ThemeOut are the bubble palettes for this contact's received
+	// and sent messages. Empty keeps the derived surface.
+	ThemeIn, ThemeOut string
+	Synced            bool
 }
+
+// Source records where a contact entry came from, so a local alias can be shown
+// while the imported name and number are retained for reference and merging.
+type Source struct {
+	ContactID, Source, SourceID string
+	DisplayName, PhoneNumber    string
+}
+
+const (
+	SourceLocal = "local"
+	SourcePhone = "phone"
+)
 
 // Normalize preserves international prefixes without guessing a country code.
 func Normalize(s string) (string, error) {
