@@ -31,3 +31,6 @@ var QueueOfflineWait string
 
 //go:embed 010_participant_identity.sql
 var ParticipantIdentity string
+
+//go:embed 011_attachments_and_thread_state.sql
+var AttachmentsAndThreadState string

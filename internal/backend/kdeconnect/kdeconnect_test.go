@@ -12,6 +12,20 @@ import (
 	"testing"
 )
 
+func TestCapabilitiesFollowSMSAvailability(t *testing.T) {
+	off := capabilitiesFor("unavailable")
+	if off.SendText || off.ReceiveText || off.ReceiveMedia {
+		t.Fatalf("unavailable plugin advertised features: %+v", off)
+	}
+	on := capabilitiesFor("available")
+	if !on.SendText || !on.ReceiveText || !on.Groups || !on.ReceiveMedia || !on.ContactSync {
+		t.Fatalf("available plugin missing features: %+v", on)
+	}
+	if on.SendMedia || on.DeliveryStatus {
+		t.Fatalf("KDE Connect cannot send media or report delivery: %+v", on)
+	}
+}
+
 func TestParseDevices(t *testing.T) {
 	input := "- Office: Pixel: phone1 on 192.0.2.1 via LAN (paired and reachable)\n- Old phone: phone2 (paired)\n- Stranger: phone3 (reachable)\n- Gone: phone4 \n4 devices found\n"
 	ds, err := ParseDevices(input)

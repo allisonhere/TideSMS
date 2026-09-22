@@ -89,8 +89,26 @@ func (c *Client) Devices(ctx context.Context) ([]backend.Device, error) {
 		if devices[i].Connected && c.Probe != nil {
 			devices[i].SMSCapability = c.Probe(ctx, devices[i].ID)
 		}
+		devices[i].Capabilities = capabilitiesFor(devices[i].SMSCapability)
 	}
 	return devices, nil
+}
+
+// capabilitiesFor maps the SMS plugin's availability onto the feature set.
+// KDE Connect's SMS plugin carries text, group threads and received
+// attachments; it cannot send media, and it reports no delivery receipt, so
+// those stay false rather than being promised by the UI.
+func capabilitiesFor(sms string) backend.Capabilities {
+	if sms != "available" {
+		return backend.Capabilities{}
+	}
+	return backend.Capabilities{
+		SendText:     true,
+		ReceiveText:  true,
+		Groups:       true,
+		ReceiveMedia: true,
+		ContactSync:  true,
+	}
 }
 func (c *Client) Send(ctx context.Context, req backend.SendRequest) error {
 	phone, err := contacts.Normalize(req.PhoneNumber)

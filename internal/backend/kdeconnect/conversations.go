@@ -102,9 +102,20 @@ func decodeMessage(device string, v dbus.Variant) (domain.Message, error) {
 		if m.Body != "" {
 			m.Body += "\n"
 		}
-		m.Body += "[Attachment · not displayed]"
+		m.Body += "[Attachment]"
 	}
 	m.ID = m.StableID()
+	// Attachments are metadata-only until fetched; the message renders without
+	// waiting for them.
+	for _, a := range w.Attachments {
+		m.Attachments = append(m.Attachments, domain.Attachment{
+			ID:        m.ID + ":" + strconv.FormatInt(a.PartID, 10),
+			MessageID: m.ID,
+			MIMEType:  a.MIME,
+			RemoteID:  a.Identifier,
+			State:     domain.AttachmentMetadata,
+		})
+	}
 	return m, nil
 }
 func connect(ctx context.Context) (*dbus.Conn, error) {

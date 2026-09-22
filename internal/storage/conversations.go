@@ -128,6 +128,14 @@ func (s *Store) MergeMessages(messages []domain.Message) ([]domain.Message, erro
 				return nil, err
 			}
 		}
+		// Attachment metadata may arrive or change on a replay, so upsert it
+		// whether or not the message row was new.
+		for _, a := range m.Attachments {
+			a.MessageID = m.ID
+			if err = upsertAttachment(tx, a); err != nil {
+				return nil, err
+			}
+		}
 
 	}
 	if err = tx.Commit(); err != nil {
@@ -136,8 +144,8 @@ func (s *Store) MergeMessages(messages []domain.Message) ([]domain.Message, erro
 	return added, nil
 }
 func (s *Store) Threads(device string) ([]domain.Thread, error) {
-	rows, err := s.db.Query(`SELECT t.id,t.device_id,t.backend_id,t.display_name,t.last_message,t.last_timestamp,t.theme,t.theme_in,t.theme_out,t.is_group,
- MAX(t.unread_override,(SELECT COUNT(*) FROM messages m WHERE m.thread_id=t.id AND m.unread=1)) FROM threads t WHERE (?='' OR device_id=?) ORDER BY last_timestamp DESC,id`, device, device)
+	rows, err := s.db.Query(`SELECT t.id,t.device_id,t.backend_id,t.display_name,t.last_message,t.last_timestamp,t.theme,t.theme_in,t.theme_out,t.is_group,t.pinned,t.archived,
+ MAX(t.unread_override,(SELECT COUNT(*) FROM messages m WHERE m.thread_id=t.id AND m.unread=1)) FROM threads t WHERE (?='' OR device_id=?) ORDER BY t.pinned DESC,last_timestamp DESC,id`, device, device)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +153,7 @@ func (s *Store) Threads(device string) ([]domain.Thread, error) {
 	for rows.Next() {
 		var t domain.Thread
 		var ms int64
-		if err = rows.Scan(&t.ID, &t.DeviceID, &t.BackendID, &t.DisplayName, &t.LastMessage, &ms, &t.ThemeID, &t.ThemeIn, &t.ThemeOut, &t.IsGroup, &t.UnreadCount); err != nil {
+		if err = rows.Scan(&t.ID, &t.DeviceID, &t.BackendID, &t.DisplayName, &t.LastMessage, &ms, &t.ThemeID, &t.ThemeIn, &t.ThemeOut, &t.IsGroup, &t.Pinned, &t.Archived, &t.UnreadCount); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -257,6 +265,19 @@ func (s *Store) MarkUnread(thread string) error {
 }
 func (s *Store) ThreadTheme(thread, theme string) error {
 	_, err := s.db.Exec("UPDATE threads SET theme=? WHERE id=?", theme, thread)
+	return err
+}
+
+// SetThreadPinned pins or unpins a thread. Pinned threads sort first.
+func (s *Store) SetThreadPinned(thread string, pinned bool) error {
+	_, err := s.db.Exec("UPDATE threads SET pinned=? WHERE id=?", boolInt(pinned), thread)
+	return err
+}
+
+// SetThreadArchived archives or restores a thread. Archived threads leave the
+// main list but remain searchable.
+func (s *Store) SetThreadArchived(thread string, archived bool) error {
+	_, err := s.db.Exec("UPDATE threads SET archived=? WHERE id=?", boolInt(archived), thread)
 	return err
 }
 

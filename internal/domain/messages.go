@@ -71,6 +71,9 @@ type Thread struct {
 	LastTimestamp     time.Time
 	UnreadCount       int
 	IsGroup           bool
+	// Pinned threads sort first; archived threads leave the main list.
+	Pinned   bool
+	Archived bool
 }
 type Message struct {
 	ID, DeviceID, ThreadID, BackendID, Sender, Body string
@@ -80,7 +83,36 @@ type Message struct {
 	Unread                                          bool
 	Participants                                    []Participant
 	IsGroup                                         bool
+	// Attachments are media parts. They may be metadata-only until fetched; a
+	// conversation renders without waiting for them.
+	Attachments []Attachment
 }
+
+// AttachmentState tracks how much of an attachment is available locally.
+type AttachmentState string
+
+const (
+	// AttachmentMetadata means only the part's description is known.
+	AttachmentMetadata AttachmentState = "metadata"
+	// AttachmentDownloading is in progress.
+	AttachmentDownloading AttachmentState = "downloading"
+	// AttachmentAvailable is present at LocalPath.
+	AttachmentAvailable AttachmentState = "available"
+	// AttachmentFailed could not be fetched.
+	AttachmentFailed AttachmentState = "failed"
+)
+
+// Attachment is one media part of a message.
+type Attachment struct {
+	ID, MessageID, MIMEType, Filename string
+	Size                              int64
+	LocalPath, RemoteID               string
+	Width, Height                     int
+	State                             AttachmentState
+}
+
+// HasMedia reports whether a message carries any attachment.
+func (m Message) HasMedia() bool { return len(m.Attachments) > 0 }
 
 func ThreadID(device, id string) string { return "thread:" + device + ":" + id }
 func (m Message) StableID() string {

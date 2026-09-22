@@ -6,10 +6,24 @@ import (
 	"github.com/allisonhere/tidesms/internal/domain"
 )
 
+// Capabilities describes what a backend can actually do for a device, so the
+// interface never offers a feature the transport cannot carry. It is
+// deliberately conservative: an unknown capability is false.
+type Capabilities struct {
+	SendText       bool
+	ReceiveText    bool
+	Groups         bool
+	ReceiveMedia   bool
+	SendMedia      bool
+	DeliveryStatus bool
+	ContactSync    bool
+}
+
 type Device struct {
 	ID, Name      string
 	Connected     bool
 	SMSCapability string
+	Capabilities  Capabilities
 }
 type SendRequest struct{ DeviceID, PhoneNumber, Message, ThreadID string }
 type MessagingBackend interface {

@@ -265,6 +265,84 @@ func TestGlobalSearchUsesFTSAndFilters(t *testing.T) {
 	}
 }
 
+func TestAttachmentsAndThreadState(t *testing.T) {
+	s := openStore(t)
+	base := time.UnixMilli(1_700_000_000_000)
+	p := []domain.Participant{domain.ParticipantFor("+15551234567")}
+	thread := domain.ThreadID("phone", "amy")
+	att := domain.Attachment{ID: "a1", MIMEType: "image/jpeg", Filename: "dinner.jpg", Size: 1_800_000, RemoteID: "part-1", Width: 1920, Height: 1080, State: domain.AttachmentMetadata}
+	if _, err := s.MergeMessages([]domain.Message{{
+		ID: "m1", DeviceID: "phone", ThreadID: thread, BackendID: "b1", Sender: "+15551234567",
+		Body: "look", Timestamp: base, Direction: domain.Incoming, Status: domain.Unknown,
+		Participants: p, Attachments: []domain.Attachment{att},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.Attachments("m1")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("attachments = %+v err=%v", list, err)
+	}
+	if list[0].MIMEType != "image/jpeg" || list[0].Filename != "dinner.jpg" || list[0].Size != 1_800_000 || list[0].State != domain.AttachmentMetadata {
+		t.Fatalf("attachment = %+v", list[0])
+	}
+	byThread, err := s.AttachmentsForThread(thread)
+	if err != nil || len(byThread["m1"]) != 1 {
+		t.Fatalf("thread attachments = %+v err=%v", byThread, err)
+	}
+	if err := s.SetAttachmentState("a1", domain.AttachmentAvailable, "/tmp/dinner.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Attachments("m1")
+	if got[0].State != domain.AttachmentAvailable || got[0].LocalPath != "/tmp/dinner.jpg" {
+		t.Fatalf("state not updated: %+v", got[0])
+	}
+	// A replayed message with the same attachment must not duplicate it.
+	if _, err := s.MergeMessages([]domain.Message{{
+		ID: "m1", DeviceID: "phone", ThreadID: thread, BackendID: "b1", Sender: "+15551234567",
+		Body: "look", Timestamp: base, Direction: domain.Incoming, Status: domain.Unknown,
+		Participants: p, Attachments: []domain.Attachment{att},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = s.Attachments("m1"); len(list) != 1 {
+		t.Fatalf("replay duplicated attachment: %+v", list)
+	}
+
+	// Pinned threads sort first; archived is a remembered flag.
+	if err := s.SetThreadPinned(thread, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadArchived(thread, true); err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := s.Threads("phone")
+	if len(ts) != 1 || !ts[0].Pinned || !ts[0].Archived {
+		t.Fatalf("thread state = %+v", ts)
+	}
+}
+
+func TestMergeThreadsRoundTrip(t *testing.T) {
+	s := openStore(t)
+	base := time.UnixMilli(1_700_000_000_000)
+	mk := func(id string, at time.Time) domain.Thread {
+		return domain.Thread{ID: domain.ThreadID("phone", id), DeviceID: "phone", BackendID: id, DisplayName: id, Participants: []domain.Participant{domain.ParticipantFor("+1555" + id)}, LastTimestamp: at}
+	}
+	if err := s.MergeThreads([]domain.Thread{mk("1", base), mk("2", base.Add(time.Hour))}); err != nil {
+		t.Fatal(err)
+	}
+	// Pin the older thread; it should lead the list.
+	if err := s.SetThreadPinned(domain.ThreadID("phone", "1"), true); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := s.Threads("phone")
+	if err != nil || len(ts) != 2 {
+		t.Fatalf("threads = %+v err=%v", ts, err)
+	}
+	if ts[0].BackendID != "1" {
+		t.Fatalf("pinned thread not first: %+v", ts)
+	}
+}
+
 func TestBubbleThemesRoundTrip(t *testing.T) {
 	s := openStore(t)
 	// Contacts keep their per-direction bubble palettes.
