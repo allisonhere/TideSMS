@@ -108,6 +108,7 @@ type Model struct {
 	mediaMsgID      string
 	graphics        media.Protocol
 	mediaPreview    bool
+	clearImages     bool
 	pendingOpenPath string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend

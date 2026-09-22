@@ -72,14 +72,23 @@ func (m *Model) currentAttachment() (domain.Attachment, bool) {
 func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "esc", "q":
+		if m.mediaPreview {
+			m.clearImages = true
+		}
 		m.mediaPreview = false
 		m.modal = ""
 		return nil
 	case "left", "h", "p":
+		if m.mediaPreview {
+			m.clearImages = true
+		}
 		m.mediaIndex = max(0, m.mediaIndex-1)
 		m.mediaPreview = false
 		return nil
 	case "right", "l", "n":
+		if m.mediaPreview {
+			m.clearImages = true
+		}
 		m.mediaIndex = min(len(m.mediaAtts)-1, m.mediaIndex+1)
 		m.mediaPreview = false
 		return nil
@@ -187,6 +196,9 @@ func (m *Model) toggleMediaPreview() {
 		m.notify("This terminal cannot draw images; open externally instead", true)
 		return
 	}
+	if m.mediaPreview {
+		m.clearImages = true
+	}
 	m.mediaPreview = !m.mediaPreview
 }
 
@@ -211,7 +223,7 @@ func (m *Model) renderMediaFullscreen() string {
 	if name == "" {
 		name = strings.ToLower(kind)
 	}
-	return "\x1b[2J\x1b[H" + seq + "\n\n" + name + " · " + size + "\n\nv or Esc back"
+	return seq + "\n\n" + name + " · " + size + "\n\nv or Esc back"
 }
 
 // mediaViewerLines is the text shown when no image is drawn.
