@@ -208,7 +208,8 @@ func halfBlocks(img image.Image, maxCols, maxRows int) []string {
 		return nil
 	}
 	cols := min(maxCols, w)
-	// A cell is roughly twice as tall as it is wide.
+	// A cell is roughly twice as tall as it is wide, so a cell pair of pixels
+	// keeps the aspect ratio.
 	rows := cols * h / (2 * w)
 	if rows < 1 {
 		rows = 1
@@ -219,23 +220,47 @@ func halfBlocks(img image.Image, maxCols, maxRows int) []string {
 			cols = max(1, c)
 		}
 	}
-	pixel := func(cx, py int) (uint8, uint8, uint8) {
-		x := b.Min.X + cx*w/cols
-		y := b.Min.Y + py*h/(rows*2)
-		r, g, bl, _ := img.At(x, y).RGBA()
-		return uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8)
+	// Box-average the source pixels that fall in each half-cell, so downscaled
+	// detail stays readable instead of aliasing to noise.
+	average := func(x0, x1, y0, y1 int) [3]uint8 {
+		x0 = max(x0, b.Min.X)
+		y0 = max(y0, b.Min.Y)
+		x1 = min(x1, b.Max.X)
+		y1 = min(y1, b.Max.Y)
+		if x1 <= x0 || y1 <= y0 {
+			x0, x1 = clampRange(x0, b.Min.X, b.Max.X)
+			y0, y1 = clampRange(y0, b.Min.Y, b.Max.Y)
+		}
+		var sr, sg, sb, n uint64
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				r, g, bl, _ := img.At(x, y).RGBA()
+				sr += uint64(r >> 8)
+				sg += uint64(g >> 8)
+				sb += uint64(bl >> 8)
+				n++
+			}
+		}
+		if n == 0 {
+			return [3]uint8{}
+		}
+		return [3]uint8{uint8(sr / n), uint8(sg / n), uint8(sb / n)}
 	}
 	lines := make([]string, 0, rows)
 	for row := 0; row < rows; row++ {
 		var sb strings.Builder
 		var lastTop, lastBottom [3]uint8
 		have := false
+		y0 := b.Min.Y + row*2*h/(rows*2)
+		y1 := b.Min.Y + (row*2+2)*h/(rows*2)
+		ymid := b.Min.Y + (row*2+1)*h/(rows*2)
 		for cx := 0; cx < cols; cx++ {
-			tr, tg, tb := pixel(cx, row*2)
-			br, bg, bb := pixel(cx, row*2+1)
-			top, bottom := [3]uint8{tr, tg, tb}, [3]uint8{br, bg, bb}
+			x0 := b.Min.X + cx*w/cols
+			x1 := b.Min.X + (cx+1)*w/cols
+			top := average(x0, x1, y0, ymid)
+			bottom := average(x0, x1, ymid, y1)
 			if !have || top != lastTop || bottom != lastBottom {
-				fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm", tr, tg, tb, br, bg, bb)
+				fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm", top[0], top[1], top[2], bottom[0], bottom[1], bottom[2])
 				lastTop, lastBottom, have = top, bottom, true
 			}
 			sb.WriteRune('▀')
@@ -244,6 +269,16 @@ func halfBlocks(img image.Image, maxCols, maxRows int) []string {
 		lines = append(lines, sb.String())
 	}
 	return lines
+}
+
+func clampRange(v, lo, hi int) (int, int) {
+	if v < lo {
+		return lo, min(lo+1, hi)
+	}
+	if v >= hi {
+		return max(hi-1, lo), hi
+	}
+	return v, min(v+1, hi)
 }
 
 // ImageSize decodes just the header for width and height.

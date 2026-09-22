@@ -198,8 +198,8 @@ func (m *Model) renderMediaFullscreen() string {
 	if !ok {
 		return ""
 	}
-	cols := max(20, min(80, m.width-8))
-	rows := max(6, min(24, m.height-6))
+	cols := max(20, min(120, m.width-8))
+	rows := max(6, min(50, m.height-6))
 	seq, ok := media.Render(m.graphics, localFile(a), cols, rows)
 	if !ok {
 		m.mediaPreview = false
