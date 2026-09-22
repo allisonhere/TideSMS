@@ -1,0 +1,6 @@
+/tidesms
+*.db
+*.db-shm
+*.db-wal
+*.log
+/coverage.out

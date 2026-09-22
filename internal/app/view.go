@@ -1,0 +1,205 @@
+package app
+
+import (
+	"fmt"
+	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/themes"
+	"github.com/allisonhere/tidesms/ui/components"
+	"github.com/allisonhere/tideui"
+	"github.com/charmbracelet/x/ansi"
+	"strings"
+)
+
+func (m *Model) dimensions() (left, right, body, editor int) {
+	if m.history.enabled {
+		body = max(1, m.height-4)
+		editor = max(1, min(5, body/4))
+		switch {
+		case m.width >= 70:
+			left = int(float64(m.width) * .28)
+			right = m.width - left
+		default:
+			left = 0
+			right = m.width
+		}
+		return
+	}
+	left = int(float64(m.width) * 0.28)
+	right = m.width - left
+	body = max(1, m.height-4)
+	editor = max(1, body-9)
+	return
+}
+func (m *Model) sizeEditor() {
+	_, right, _, height := m.dimensions()
+	m.editor.Size(max(1, right-2), height)
+	m.layoutConversation()
+}
+func (m *Model) View() string {
+	if !m.ready {
+		return ""
+	}
+	if m.history.enabled {
+		return m.historyView()
+	}
+	theme := themes.Resolve(m.cfg.General.Theme, m.recipient.Theme, m.recipient.PhoneNumber)
+	r := tideui.NewRenderer(theme, tideui.StyleOptions{PaneCorners: tideui.RoundCorners, ModalShadow: true})
+	left, right, body, eh := m.dimensions()
+	if m.width < 54 || m.height < 16 {
+		return r.Render(tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, Panes: [3]tideui.Pane{{Title: "TideSMS", Content: "Resize to at least 54 × 16\nDrafts remain safe.\nCtrl+P → Quit"}}})
+	}
+	list := components.ContactList(r, m.filtered(), max(0, m.selected), m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching)
+	title := "New Message"
+	if m.sending {
+		title = "Sending…"
+	}
+	header := components.Recipient(r, m.recipient.Name, m.recipient.PhoneNumber)
+	// Fixed recipient region and editor viewport keep the composer stable on resize.
+	lines := strings.Split(header, "\n")
+	for len(lines) < 4 {
+		lines = append(lines, "")
+	}
+	separator := r.Styles.DetailMeta.Render(strings.Repeat("─", max(1, right-2)))
+	mode := m.editor.Mode() + " · Ripple"
+	if !m.focus {
+		mode += " · Tab to compose"
+	}
+	lines = append(lines, separator, r.Styles.DetailMeta.Render(mode))
+	ed := strings.Split(m.editor.View(theme.BorderFocus), "\n")
+	for len(ed) < eh {
+		ed = append(ed, "")
+	}
+	lines = append(lines, ed[:eh]...)
+	lines = append(lines, separator, r.Styles.DetailMeta.Render("Alt+Enter / F12 send · Alt+Esc contacts"))
+	notification := m.notice
+	if notification == "" {
+		notification = "Local drafts · Ctrl+P commands · ? help"
+	}
+	lines = append(lines, ansi.Truncate(components.Notification(r, notification, m.failed), right-2, "…"))
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, right-2, "")
+	}
+	status := components.Status(m.currentDevice(), theme.Name, strings.ToUpper(m.cfg.Composer.Mode))
+	layout := tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, SidebarRatio: 0.28, Status: &status, Panes: [3]tideui.Pane{{Title: "Contacts", Hint: "/ search", Content: list, Focused: !m.focus, Accent: theme.BorderFocus}, {Title: title, Content: strings.Join(lines, "\n"), Focused: m.focus, Accent: theme.BorderFocus}}}
+	if m.modal != "" {
+		overlay := m.renderModal(r)
+		layout.Modal = &overlay
+	}
+	return r.Render(layout)
+}
+func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
+	w := max(20, min(66, m.width-8))
+	title := m.modal
+	body := ""
+	hint := "↑↓ choose · Enter confirm · Esc cancel"
+	switch m.modal {
+	case "palette":
+		title = "Commands"
+		body = m.filter.View() + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "devices":
+		title = "KDE Connect devices"
+		labels := []string{}
+		for _, d := range m.devices {
+			state := "○ offline"
+			if d.Connected {
+				state = "● connected"
+			}
+			labels = append(labels, d.Name+" · "+state)
+		}
+		body = components.Choices(r, labels, m.choice, w-4, max(1, m.height-15))
+		if len(m.devices) > 0 {
+			idx := max(0, min(m.choice, len(m.devices)-1))
+			d := m.devices[idx]
+			body += "\n\nID: " + d.ID + "\nSMS: " + d.SMSCapability
+		} else {
+			body = "No paired devices. Pair your phone in KDE Connect.\nPress r from Contacts to refresh."
+		}
+	case "compose":
+		title = "New message"
+		body = m.filter.View() + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-14))
+		hint = "Type a name or number · ↑↓ choose · Enter open · Esc cancel"
+	case "number", "add", "edit":
+		title = map[string]string{"number": "New recipient", "add": "Add contact", "edit": "Edit contact"}[m.modal]
+		for i, f := range m.fields {
+			label := "Phone number"
+			if len(m.fields) > 1 && i == 0 {
+				label = "Name"
+			}
+			body += label + "\n" + f.View() + "\n\n"
+		}
+		hint = "Tab next field · Enter save · Esc cancel"
+	case "thread-themes":
+		title = "Thread accent"
+		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "message":
+		title = "Message details"
+		if msg := m.history.view.Current(); msg != nil {
+			// The number is reported alongside the resolved name so an unfamiliar
+			// sender is never hidden behind a contact label.
+			from, number := msg.Sender, msg.Sender
+			if msg.Direction == domain.Outgoing {
+				from, number = "You", ""
+				if t := m.history.active; t != nil && len(t.Participants) == 1 {
+					number = t.Participants[0].RawNumber
+				}
+			}
+			for _, c := range m.contacts {
+				if c.PhoneNumber == msg.Sender {
+					from = c.Name
+				}
+			}
+			body = "From: " + contacts.SafeLabel(from) + "\n"
+			if number != "" {
+				body += "Number: " + number + "\n"
+			}
+			body += fmt.Sprintf("Time: %s\nDirection: %s\nStatus: %s\nBackend ID: %s\n\n", msg.Timestamp.Local().Format("Jan 2, 2006 3:04:05 PM"), msg.Direction, msg.Status, msg.BackendID) + components.Choices(r, m.choices, m.choice, w-4, 4)
+		}
+	case "themes":
+		title = "Contact accent · " + m.editing.Name
+		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "global-theme":
+		title = "Global theme"
+		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "settings":
+		title = "Settings"
+		bubbles := "off"
+		if m.cfg.Conversation.Bubbles {
+			bubbles = "on"
+		}
+		fill := "off"
+		if m.cfg.Conversation.FillBubbles {
+			fill = "on"
+		}
+		body = fmt.Sprintf("Theme: %s   Composer: %s\nBubbles: %s   Corners: %s   Fill: %s\nAI: reserved · not implemented\n\n", m.cfg.General.Theme, m.cfg.Composer.Mode, bubbles, m.cfg.Conversation.Corners, fill) + components.Choices(r, m.choices, m.choice, w-4, 4) + "\n\n" + m.configPath
+	case "delete":
+		title = "Delete contact"
+		body = "Delete “" + m.editing.Name + "”?\nThe contact will be removed. Its draft is retained.\n"
+		hint = "Enter delete · Esc cancel"
+	case "help":
+		title = "Keyboard shortcuts"
+		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nq Quit (saves drafts)\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Send\nEnter  New line   Alt+Esc  Leave composer\nEsc and Vim keys belong to Ripple\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
+		if m.history.enabled {
+			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Submit   Enter  New line\nAlt+Esc  History   Esc  Ripple Vim behavior\n\nq  Quit from navigation panes"
+		}
+		hint = "↑↓ scroll · Esc close"
+	}
+	if m.failed {
+		body += "\n\n" + ansi.Truncate(m.notice, w-4, "…")
+	}
+	if m.busy {
+		hint = "Saving…"
+	}
+	// Bound tall dialogs while keeping the active selection and footer visible.
+	maxLines := max(1, m.height-8)
+	ls := strings.Split(body, "\n")
+	if len(ls) > maxLines {
+		start := 0
+		if m.modal == "help" {
+			start = min(m.choice, len(ls)-maxLines)
+		}
+		ls = ls[start : start+maxLines]
+	}
+	body = strings.Join(ls, "\n") + "\n\n" + hint
+	return components.Modal(r, title, body, w)
+}

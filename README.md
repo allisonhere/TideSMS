@@ -1,0 +1,213 @@
+# TideSMS
+
+A keyboard-first terminal SMS client built with [TideUI](https://github.com/allisonhere/tideui) and [Ripple](https://github.com/allisonhere/ripple). It reads your phone's SMS threads over KDE Connect, caches them in SQLite, follows new messages live, and replies from a threaded conversation view. MMS rendering, scheduled sending, an offline send queue, and AI features are not implemented.
+
+## Run
+
+Requirements: Go 1.26.1 or newer to build, `kdeconnect-cli`, and a paired Android phone. Run TideSMS in your desktop session, with the KDE Connect daemon available. Enable the SMS plugin and grant its Android permissions. `busctl` (normally provided by systemd) enables the optional read-only SMS capability check. Clipboard operations use the system clipboard through `wl-copy`/`wl-paste`, `xclip`, or the platform equivalent.
+
+```sh
+make build
+./tidesms
+```
+
+The binary is built in this directory; nothing is installed system-wide. `./tidesms --help` lists path overrides, and `./tidesms --version` prints the version.
+
+1. The app selects the only connected device with a loaded SMS plugin, or opens a device selector. Use **Ctrl+P → Switch device** to change it. The selector shows device ID, reachability, and SMS capability.
+2. Press **n** to start a message. That opens a search over your whole address book — your own contacts and everyone imported from the phone — and typing a full number offers that number directly, so an unknown recipient needs no separate step. Press **a** to save a contact. Phone numbers accept common formatting; an international prefix is recommended. No country code is guessed.
+3. TideSMS opens on the **Threads** pane, populated from the local cache before the phone answers. **Enter** opens a thread. **c** borrows the sidebar for the contact list, where **Enter** on a contact opens their thread if one exists, and **Esc** returns to threads.
+4. Press **Enter** on a contact or thread, then compose. **Alt+Enter** submits; **Enter alone always inserts a newline**. **Ctrl+Enter**, **F12** and **Ctrl+P → Send message** are equivalent explicit send actions.
+5. **Alt+Esc** returns to the conversation. Switching threads retains each thread's draft. Use **t** to change a contact's accent, or **Ctrl+P → Change thread theme** for this thread only.
+
+## Conversations
+
+The layout is threads plus conversation from 70 columns up, and a single focused pane below that. The contact list is not a permanent third column: threads already carry resolved names, so the list shares the sidebar and appears only when you press **c**, with **Esc** returning to threads. That keeps the full remaining width for the conversation. **Tab** and **Shift+Tab** cycle panes and preserve each pane's selection and scroll position across width changes.
+
+A conversation shows date separators, an unread boundary, incoming and outgoing messages on opposite sides, the sender's resolved name, per-message timestamps, and the status of each outgoing message. Messages grow with the pane, keeping only a small gap on the opposite side so the two directions stay easy to tell apart; set `max_width` if you prefer a narrower measure on a very wide terminal. Each message is drawn in a frame, which **Ctrl+P → Open settings → Toggle message bubbles** turns off in favour of a single gutter bar, **Toggle bubble corners** switches between round and square, and **Toggle bubble fill** paints the inside of each frame. Received and sent messages fill differently: a received message sits on the theme's raised surface, a sent one on the background shifted towards the accent. All three settings persist. A pane too narrow to close a frame uses the bar regardless.
+
+```text
+David Queen · 07:24
+╭─────────────────────────────────────────────╮
+│ Morning read once hc drops if you die you   │
+│ can transfer to a different kind of realm   │
+╰─────────────────────────────────────────────╯
+
+                                   You · 07:25
+              ╭──────────────────────╮
+              │ it works thatway now │
+              ╰──────────────────────╯
+                                           sent
+``` Bodies wrap by display width, so emoji and non-Latin text are not split mid-character. **j/k** select a message, **Enter** opens the inspector, **y** copies the body, **r** replies (and prepares a failed message for retry), and **g/G** jump to the oldest loaded or newest message. Scrolling near the oldest loaded message loads another batch from the cache and, when the phone is reachable, from the phone.
+
+Selecting a thread points Ripple at it automatically; the composer header names who you are replying to. A thread counts as a group only when it has more than one distinct participant: phones often list the same person's address twice, or in two formats, and those collapse to one person rather than making a conversation unanswerable. Groups are read-only: their history is displayed and searchable, and sending is refused with an explanation, because the KDE Connect interface used here addresses a single destination number.
+
+**/** searches the open thread. The search runs against SQLite, never the phone; **n** and **N** step through matches and **Esc** restores the full thread.
+
+## Contacts from the phone
+
+**Ctrl+P → Sync phone contacts** imports your phone's address book through KDE Connect's contacts plugin, and TideSMS also imports once automatically the first time it connects to a phone. Imported entries fill in names for threads that would otherwise show a bare number, in the thread list, the conversation header and desktop notifications.
+
+The contacts sidebar deliberately does not list the whole imported address book, most of which is people you have never texted: it shows your own contacts plus the imported people you actually have a conversation with. Everyone else stays one keystroke away through **n**, the new-message search. Choosing someone who already has a thread opens it rather than starting a second one, matching numbers tolerantly.
+
+Imported entries are a read-only overlay. They live in their own table, are listed after your own contacts and marked `⟲`, and are never written into the contacts you created. Resolution runs local contact → synced contact → raw number, so a local contact always wins, and a re-import can never rename, re-theme or delete anything you made. Re-importing replaces the overlay wholesale, so a contact removed on the phone disappears here too.
+
+To theme a synced entry or change how it is stored, press **e** (edit) or **t** (theme) on it: that keeps a local copy you own, which then shadows the phone's version. **d** (delete) is refused, because the phone owns that entry — remove it on the phone instead.
+
+Requirements on the phone: **two** separate approvals, which is easy to miss. The Android **Contacts permission** must be granted to KDE Connect, *and* the Contacts plugin needs a **per-device transfer confirmation** — in the KDE Connect Android app, open this desktop's plugin settings, tap the Contacts row itself and accept the dialog. Until that second approval is given, the plugin still advertises contacts support and still receives the request, but silently sends nothing back; the import reports this rather than failing obscurely. Set `sync_from_phone = false` to disable the feature entirely; nothing is then read or stored.
+
+The plugin caches vCards under `~/.local/share/kpeoplevcard/kdeconnect-<device-id>/`; TideSMS reads that cache and stores only the names and numbers it needs. Android emits vCard 2.1 with quoted-printable text, which is parsed alongside 3.0 and 4.0.
+
+## Synchronization and offline behavior
+
+Cached threads render before any phone call is made. Synchronization then runs in the background and updates the view incrementally; the interface is never blanked while it runs. The status bar reports `Syncing N threads…`, then `Synced HH:MM`, and the phone's reachability separately.
+
+Each thread records the last backend message id it has seen. A thread whose latest id is unchanged is not downloaded again; a thread with new activity is replayed only back to that watermark. Messages are keyed by their KDE Connect id where one exists and otherwise by a deterministic fingerprint over thread, sender, timestamp, body and direction, so repeated syncs cannot duplicate a message. Timestamps alone are never treated as unique.
+
+New messages arrive through KDE Connect's `conversationCreated`/`conversationUpdated` signals rather than polling. If the daemon disappears or the phone drops off Wi-Fi, the subscription is restored automatically and the missed messages are collected; no restart is needed. While the phone is away you can still browse threads, read cached history, search, and write drafts. Sending fails cleanly and keeps the message for retry.
+
+Unread state is local. A thread is marked read when you open it and are at the newest messages, never merely because the app started. **Ctrl+P → Mark thread unread** restores the badge.
+
+A message that arrives in the thread you are looking at updates it silently. One that arrives elsewhere raises that thread's unread count and posts a desktop notification, showing the sender and, unless `show_body = false`, the message text.
+
+## Keys
+
+| Context | Key | Action |
+|---|---|---|
+| Contacts | j/k, arrows | Move one contact |
+| Contacts | PgUp/PgDn, Ctrl+U/D | Move a page |
+| Contacts | g/G, Home/End | First/last contact |
+| Contacts | Enter | Select and compose |
+| Contacts | / | Search names and phone numbers |
+| Contacts | a / e / d | Add / edit / delete (with confirmation) |
+| Contacts | n / t / r | New message (searches everyone) / contact theme / refresh devices |
+| Contacts | ⟲ rows | Entries imported from the phone; e or t keeps a local copy |
+| Contacts | ? / q | Help / save drafts and quit |
+| Threads | j/k, arrows | Move one thread |
+| Threads | g/G, Home/End | First/last thread |
+| Threads | Enter | Open the conversation |
+| Threads | r / c / n | Refresh conversations / contacts / new message |
+| Conversation | j/k, arrows | Select previous/next message |
+| Conversation | PgUp/PgDn, Ctrl+U/D | Scroll; near the top loads older history |
+| Conversation | g / G | Oldest loaded / newest message |
+| Conversation | Enter | Message inspector |
+| Conversation | y / r | Copy body / reply (retry a failed message) |
+| Conversation | / then n/N, Esc | Search this thread, step matches, exit |
+| Any pane | Tab / Shift+Tab | Cycle threads / conversation / composer |
+| Contacts | Esc / c | Return to the thread list |
+| Any pane | Ctrl+P | Searchable command palette |
+| Composer | Alt+Enter | Submit SMS |
+| Composer | Ctrl+Enter / F12 | Submit SMS (equivalent) |
+| Composer | Alt+Esc | Leave composer |
+| Composer | Esc | Ripple's own Vim behavior |
+
+Ripple owns editor movement, wrapping, selection, copy/paste, multiline text, and undo/redo. Normal mode uses Shift+movement, Ctrl+arrows, Ctrl+C/X/V, and Ctrl+Z/Y. Vim mode supports Normal, Insert, Visual and Visual-line modes, motions/operators, and `u`/`Ctrl+R`. **Ctrl+C copies while the composer is focused.** App navigation never consumes ordinary Vim keys. Ripple's `:w`/`:q` intents do not submit or quit TideSMS; use the explicit application commands.
+
+**Alt+Enter**, **Ctrl+Enter** and **F12** all submit, and **Enter alone always inserts a newline**. Alt+Enter is the recommended default because window managers frequently bind Ctrl+Enter themselves; Hyprland, for instance, commonly claims it for spawning a terminal. Modified Enter requires a terminal that distinguishes it: TideSMS requests Kitty keyboard disambiguation and xterm modifyOtherKeys and handles their modified-key reports, and Alt+Enter also works through the plain ESC-prefixed form. Some terminals/multiplexers still collapse modified Enter; use F12 or the palette there. Protocol settings are restored on exit. At very small sizes the app asks for a terminal of at least 54×16; drafts are retained.
+
+## Configuration and storage
+
+Defaults respect XDG directory environment variables:
+
+- `~/.config/tidesms/config.toml`
+- `~/.local/share/tidesms/state.db`
+- `~/.local/state/tidesms/tidesms.log`
+
+```toml
+[sync]
+initial_messages = 100 # first batch per thread, 1-1000
+page_size = 100        # additional batch size, 1-1000
+
+[contacts]
+sync_from_phone = true # import the phone's address book as a read-only overlay
+
+[notifications]
+enabled = true
+show_body = true # false announces "New SMS" without the text
+
+[conversation]
+timestamps = "smart"        # or "full"
+show_date_separators = true
+max_width = 0               # widest a message may grow; 0 uses the pane
+bubbles = true              # draw a frame around each message
+corners = "round"           # or "square"
+fill_bubbles = true         # paint the frame on the theme's raised surface
+
+[general]
+theme = "tide"
+
+[composer]
+mode = "normal" # or "vim"
+
+[kdeconnect]
+preferred_device = ""
+
+[ai]
+enabled = false # reserved; no AI functionality is implemented
+
+[logging]
+debug_content = false
+```
+
+Use the command palette to toggle editing mode or open settings and choose the global theme. Themes are TideUI's own palettes — Catppuccin (Mocha, Latte, Frappé, Macchiato), Nord, Dracula, Gruvbox (dark and light), Tokyo Night (and Day), Rosé Pine (and Moon, Dawn), One Dark, Magenta Geode, Coral Sunset, Lavender Fields Forever, VT100 and VT52 — and any of them can be assigned to an individual contact with **t**, or to a thread with **Ctrl+P → Change thread theme**.
+
+Themes resolve global → contact → thread, and a contact's or thread's theme applies **only inside the conversation view**. The thread list, contact list, status bar and modals always stay on the global theme, so moving between people recolours the conversation and its border without repainting the interface around it. An explicit theme is used whole there — background, foreground and accent — so the conversation pane is painted in that palette while the panes beside it keep the global one.
+
+Every theme picker previews as you move through it: the conversation repaints under the contact and thread pickers, and the whole interface under the global one. Nothing is saved until Enter, and Esc leaves everything as it was. Without one, the conversation keeps the global palette and only its accent is derived from the phone number, so people remain distinguishable without anything shifting; a group with no theme takes a stable accent from its thread id. Accent names used by earlier versions (`tide`, `rose`, `ocean`, `violet`, `amber`, `mint`, `mono`) still work and are applied as an accent over the default palette, so existing configurations and contacts need no change. Contact and thread themes live in SQLite; global settings and preferred device live in TOML.
+
+The palette is context-sensitive and adds **Search current thread**, **Refresh conversations**, **Change thread theme**, **Mark thread unread**, **Copy phone number**, **Open contact**, **Jump to newest** and **Sync phone contacts** while conversations are available.
+
+SQLite migrations run transactionally on startup. Threads, participants, messages and per-thread sync state live in the same database, indexed on `messages(thread_id, timestamp)`, `messages(device_id, thread_id, backend_id)` and `threads(device_id, last_timestamp)`. The database is the only source the interface renders from, so navigation stays fast while the phone is slow or absent.
+
+Contact IDs are independent of phone numbers. Drafts are keyed by thread once a thread exists, and by normalized number before that; a draft written against a number is carried into that person's thread the first time it is opened, and only for an unambiguous one-person thread. Changing a contact's number never transfers its old draft to the new number. Deleting a contact retains its draft, recoverable by entering its number again.
+
+Contacts imported from the phone are stored per device in their own table. They are matched to threads by exact normalized number first; failing that, by the trailing ten digits, because phones commonly store a number as `8165550182` while the same SMS address arrives as `+18165550182`. That looser match is used **only when exactly one contact shares those digits**, so two unrelated numbers are never merged on resemblance alone, and an exact match always wins. Numbers are normalized before matching, preserving the raw form for display and never guessing a country code. Two numbers are only treated as one contact when their normalized forms are identical; a sender with no contact remains a first-class thread shown by number.
+
+Draft saves are debounced by 400 ms and guarded by revisions against out-of-order writes. Normal quit flushes every draft and cancels quitting if saving fails. Signal shutdown also attempts a final flush. Abrupt process termination or power loss can lose edits since the last completed save. Config writes use atomic rename; malformed config is preserved and reported inside the UI, with defaults used until the file is fixed and the app restarted.
+
+Logs use structured JSON. Message contents, destinations, CLI arguments, and raw subprocess output are not logged by default. `debug_content = true` explicitly enables outgoing message text in the log. The database contains plaintext contacts and drafts; new state directories/files use owner-only permissions.
+
+## What “submitted” means
+
+Sending uses an argument vector, never a shell:
+
+```text
+kdeconnect-cli --device DEVICE --send-sms MESSAGE --destination NUMBER
+```
+
+Before submission, TideSMS saves the draft and rechecks reachability and the loaded SMS plugin. An unavailable plugin blocks submission. If the optional `busctl` check cannot run, capability is displayed as **unknown** and a device can be selected manually.
+
+A successful CLI exit clears the unchanged submitted draft and displays **“Submitted … · delivery unverified.”** Failures retain the draft. There is no automatic retry or offline queue.
+
+Outgoing messages appear immediately as `sending`, become `submitted` when the backend accepts them and `failed` when it does not, and a failed message stays selectable for **r** to retry. Nothing is retried automatically. Statuses read back from the phone are only those KDE Connect actually reports for a message type — sent, queued, failed, sending — and no delivery state is invented for the rest, which stay `unknown`.
+
+The current upstream CLI waits for `sendWithoutConversation` but does **not** inspect its D-Bus error reply. The SMS plugin dispatches a request to Android without returning a delivery receipt. Consequently, even with the preflight checks, CLI success cannot prove Android sent the message. Check the phone for the first live test and whenever submission is uncertain. This is a CLI backend limitation, not a delivery guarantee.
+
+Sources checked for this implementation: [KDE CLI](https://github.com/KDE/kdeconnect-kde/blob/master/cli/kdeconnect-cli.cpp), [SMS plugin](https://invent.kde.org/network/kdeconnect-kde/tree/master/plugins/sms), [device capability interface](https://github.com/KDE/kdeconnect-kde/blob/master/core/device.h).
+
+## Architecture and development
+
+- `internal/app`: state transitions, focus, commands, async side effects; rendering in `view.go` and `history_view.go` only consumes state.
+- `internal/domain`: transport-independent threads, messages, participants, events, and the message identity rule. No package outside `internal/backend/kdeconnect` knows about D-Bus.
+- `internal/syncer`: backend-to-cache synchronization, watermarks and paging, independent of the UI.
+- `ui/conversation`: message layout, wrapping, selection, scrolling and match highlighting.
+- `ui/composer`: the only Ripple integration, including clipboard and editor intent handling.
+- `ui/components`: TideUI contact list, thread list, recipient header, status/notifications, choices and modal surfaces.
+- `internal/backend`: `MessagingBackend` and `ConversationBackend` interfaces and request/device types.
+- `internal/backend/kdeconnect`: bounded CLI execution for sending, plus the `org.kde.kdeconnect.device.conversations` D-Bus interface for threads, history and signals, and `org.kde.kdeconnect.device.contacts` with the vCard cache for the address book. No KDE Connect network protocol implementation.
+- `internal/backend/fake`: deterministic fixtures — devices, threads, history, injected incoming messages, disconnect/reconnect and send failures — so development and tests need no live phone.
+- `internal/storage`, `migrations`: SQLite repository and versioned migrations.
+- `internal/notifications`: desktop notifications, escaped as plain text.
+- `internal/config`, `internal/logging`, `internal/themes`, `internal/contacts`, `internal/keys`: focused support packages.
+
+```sh
+make check
+python3 scripts/smoke.py # build first; isolated pseudo-terminal + fake CLI, no real SMS
+```
+
+The opt-in read-only phone integration test is:
+
+```sh
+TIDESMS_TEST_DEVICE=YOUR_DEVICE_ID go test ./internal/backend/kdeconnect -run TestLiveDiscovery -v
+```
+
+Tests drive the real model through the fake backend, covering cached-first startup, synchronization and deduplication, live incoming messages, notification policy, send/fail/retry, thread-scoped drafts, search, thread themes, offline browsing and reconnect, and layout bounds at every adaptive width. Attachments, MMS, scheduling and an offline send queue are not implemented.
