@@ -47,6 +47,12 @@ func Detect(getenv func(string) string) Protocol {
 		return Kitty
 	}
 	program := strings.ToLower(getenv("TERM_PROGRAM"))
+	// Ghostty and WezTerm both implement the Kitty graphics protocol.
+	if strings.Contains(program, "ghostty") || strings.Contains(program, "wezterm") ||
+		strings.Contains(strings.ToLower(getenv("TERM")), "ghostty") ||
+		getenv("GHOSTTY_RESOURCES_DIR") != "" {
+		return Kitty
+	}
 	if strings.Contains(program, "iterm") || getenv("LC_TERMINAL") == "iTerm2" {
 		return ITerm
 	}

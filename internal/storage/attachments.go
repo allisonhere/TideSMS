@@ -59,7 +59,7 @@ func (s *Store) SetAttachmentState(id string, state domain.AttachmentState, loca
 func upsertAttachment(tx *sql.Tx, a domain.Attachment) error {
 	_, err := tx.Exec(`INSERT INTO attachments(id,message_id,mime,filename,size,local_path,remote_id,part_id,width,height,state)
  VALUES(?,?,?,?,?,?,?,?,?,?,?)
- ON CONFLICT(id) DO UPDATE SET mime=excluded.mime,filename=excluded.filename,size=excluded.size,remote_id=excluded.remote_id,part_id=excluded.part_id,width=excluded.width,height=excluded.height,state=CASE WHEN excluded.local_path<>'' THEN excluded.state ELSE attachments.state END,local_path=CASE WHEN excluded.local_path<>'' THEN excluded.local_path ELSE attachments.local_path END`,
+ ON CONFLICT(id) DO UPDATE SET mime=excluded.mime,filename=excluded.filename,size=excluded.size,remote_id=excluded.remote_id,part_id=excluded.part_id,width=excluded.width,height=excluded.height,state=CASE WHEN attachments.local_path='' AND excluded.local_path<>'' THEN excluded.state ELSE attachments.state END,local_path=CASE WHEN attachments.local_path='' AND excluded.local_path<>'' THEN excluded.local_path ELSE attachments.local_path END`,
 		a.ID, a.MessageID, a.MIMEType, a.Filename, a.Size, a.LocalPath, a.RemoteID, a.PartID, a.Width, a.Height, string(a.State))
 	return err
 }

@@ -381,7 +381,7 @@ func TestAttachmentBlockRenders(t *testing.T) {
 	msg := message(domain.Incoming, "look at this")
 	msg.Attachments = []domain.Attachment{{
 		ID: "a1", MessageID: msg.ID, MIMEType: "image/jpeg", Filename: "dinner.jpg",
-		Size: 1_800_000, Width: 1920, Height: 1080, State: domain.AttachmentMetadata,
+		Size: 1_800_000, Width: 1920, Height: 1080, State: domain.AttachmentAvailable,
 	}}
 	joined := ansi.Strip(strings.Join(renderOpts(t, []domain.Message{msg}, 60, 20, Options{Timestamps: "smart"}), "\n"))
 	for _, want := range []string{"[ image: dinner.jpg ]", "1920×1080 · 1.8 MB", "v preview"} {

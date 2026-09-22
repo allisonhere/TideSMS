@@ -136,7 +136,9 @@ Media is capability-gated: the interface only offers what the backend reports it
 
 A message with media shows a compact block after its body — `[ image: dinner.jpg ]`, the dimensions and size, and a `v preview` hint — and the conversation never waits on a download. **v** on the selected message opens its attachment viewer directly (and draws the image at once when the terminal supports it and the file is local); **Enter**, then **View attachment**, reaches the same viewer through the message actions. The part starts as metadata only; **d** downloads it on demand through KDE Connect's `requestAttachmentFile`, and the daemon's cached file (`~/.cache/kdeconnect.daemon/<device>/`) becomes the local copy. Then **←/→** move between parts, **v** draws the image inline, **o** opens it externally (after an explicit confirmation), **s** copies it to the download directory without overwriting, and **c** copies its path.
 
-Inline drawing uses the Kitty graphics protocol or iTerm2 inline images, detected from the environment; Sixel is recognised but not drawn. With no graphics support the viewer stays a text list. Files are never opened or executed automatically, and a part with no local copy simply cannot be opened rather than failing.
+Inline drawing uses the Kitty graphics protocol (Kitty, Ghostty, WezTerm) or iTerm2 inline images, detected from the environment; Sixel is recognised but not drawn. With no graphics support the viewer stays a text list. Files are never opened or executed automatically, and a part with no local copy simply cannot be opened rather than failing.
+
+KDE Connect hands the thumbnail as base64 image data rather than a path, so TideSMS writes it to a small cache and shows it against the message; the full-resolution file still comes from **d**.
 
 ## Global search
 

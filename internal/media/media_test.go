@@ -36,6 +36,13 @@ func TestDetect(t *testing.T) {
 	if got := Detect(env(map[string]string{"TERM_PROGRAM": "iTerm.app"})); got != ITerm {
 		t.Fatalf("iterm = %v", got)
 	}
+	// Ghostty and WezTerm advertise Kitty graphics.
+	if got := Detect(env(map[string]string{"TERM": "xterm-ghostty", "GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"})); got != Kitty {
+		t.Fatalf("ghostty = %v", got)
+	}
+	if got := Detect(env(map[string]string{"TERM_PROGRAM": "WezTerm"})); got != Kitty {
+		t.Fatalf("wezterm = %v", got)
+	}
 	if got := Detect(env(map[string]string{"TERM": "xterm-256color"})); got != None {
 		t.Fatalf("plain = %v", got)
 	}

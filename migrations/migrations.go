@@ -37,3 +37,6 @@ var AttachmentsAndThreadState string
 
 //go:embed 012_attachment_part_id.sql
 var AttachmentPartID string
+
+//go:embed 013_clear_bad_attachment_paths.sql
+var ClearBadAttachmentPaths string

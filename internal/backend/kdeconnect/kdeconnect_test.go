@@ -5,12 +5,31 @@ import (
 	"context"
 	"errors"
 	"github.com/allisonhere/tidesms/internal/backend"
+	"github.com/allisonhere/tidesms/internal/domain"
 	"log/slog"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestThumbnailFileMaterialisesBase64(t *testing.T) {
+	// A 1x1 PNG, base64, as the plugin's thumbnail field carries it.
+	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
+	path, state := thumbnailFile("msg:1", 7, b64)
+	if state != domain.AttachmentAvailable || path == "" {
+		t.Fatalf("thumbnail not materialised: %q %v", path, state)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("thumbnail file missing: %v", err)
+	}
+	if _, state := thumbnailFile("m", 1, "not!!base64"); state != domain.AttachmentMetadata {
+		t.Fatal("garbage thumbnail should not become a path")
+	}
+	if _, state := thumbnailFile("m", 1, ""); state != domain.AttachmentMetadata {
+		t.Fatal("empty thumbnail should stay metadata-only")
+	}
+}
 
 func TestCapabilitiesFollowSMSAvailability(t *testing.T) {
 	off := capabilitiesFor("unavailable")

@@ -42,10 +42,23 @@ func (m *Model) openMediaViewer(msg domain.Message) {
 // canPreview reports whether the current part can be drawn inline.
 func (m *Model) canPreview() bool {
 	a, ok := m.currentAttachment()
-	if !ok || a.LocalPath == "" {
+	if !ok || localFile(a) == "" {
 		return false
 	}
 	return m.graphics == media.Kitty || m.graphics == media.ITerm
+}
+
+// localFile returns an attachment's path only when it names a real file. It
+// guards against stale metadata, such as a base64 string that was mistakenly
+// stored as a path, or a cached file that has since been removed.
+func localFile(a domain.Attachment) string {
+	if a.LocalPath == "" {
+		return ""
+	}
+	if fi, err := os.Stat(a.LocalPath); err == nil && !fi.IsDir() {
+		return a.LocalPath
+	}
+	return ""
 }
 
 func (m *Model) currentAttachment() (domain.Attachment, bool) {
@@ -72,19 +85,19 @@ func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "c":
 		a, ok := m.currentAttachment()
-		if !ok || a.LocalPath == "" {
-			m.notify("No local path — the file is metadata only", true)
+		if !ok || localFile(a) == "" {
+			m.notify("No local path — press d to download", true)
 			return nil
 		}
-		return m.copyText(a.LocalPath)
+		return m.copyText(localFile(a))
 	case "o":
 		a, ok := m.currentAttachment()
-		if !ok || a.LocalPath == "" {
-			m.notify("No local copy to open", true)
+		if !ok || localFile(a) == "" {
+			m.notify("No local copy to open — press d to download", true)
 			return nil
 		}
 		// Never open without an explicit confirmation.
-		m.pendingOpenPath = a.LocalPath
+		m.pendingOpenPath = localFile(a)
 		m.modal = "open-attachment"
 		m.choice = 0
 		m.choices = []string{"Open externally", "Cancel"}
@@ -113,7 +126,7 @@ func (m *Model) fetchAttachment() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if a.State == domain.AttachmentAvailable && a.LocalPath != "" {
+	if localFile(a) != "" {
 		m.notify("Already downloaded", false)
 		return nil
 	}
@@ -166,8 +179,8 @@ func (m *Model) toggleMediaPreview() {
 	if !ok {
 		return
 	}
-	if a.LocalPath == "" {
-		m.notify("No local copy to preview", true)
+	if localFile(a) == "" {
+		m.notify("No local copy to preview — press d to download", true)
 		return
 	}
 	if m.graphics == media.None || m.graphics == media.Sixel {
@@ -187,7 +200,7 @@ func (m *Model) renderMediaFullscreen() string {
 	}
 	cols := max(20, min(80, m.width-8))
 	rows := max(6, min(24, m.height-6))
-	seq, ok := media.Render(m.graphics, a.LocalPath, cols, rows)
+	seq, ok := media.Render(m.graphics, localFile(a), cols, rows)
 	if !ok {
 		m.mediaPreview = false
 		return ""
@@ -219,12 +232,13 @@ func (m *Model) mediaViewerLines() string {
 	}
 	fmt.Fprintf(&b, "%s\n", meta)
 	fmt.Fprintf(&b, "State: %s\n", a.State)
-	if a.LocalPath != "" {
-		fmt.Fprintf(&b, "File: %s\n", a.LocalPath)
+	local := localFile(a)
+	if local != "" {
+		fmt.Fprintf(&b, "File: %s\n", local)
 	} else {
 		b.WriteString("No local copy: press d to download\n")
 	}
-	if m.graphics != media.None && m.graphics != media.Sixel && a.LocalPath != "" {
+	if m.graphics != media.None && m.graphics != media.Sixel && local != "" {
 		b.WriteString("v previews inline\n")
 	}
 	return b.String()
@@ -256,15 +270,18 @@ func openExternally(path string) tea.Cmd {
 // Files that are metadata-only are not fetched here.
 func (m *Model) saveAttachment() tea.Cmd {
 	a, ok := m.currentAttachment()
-	if !ok || a.LocalPath == "" {
-		m.notify("No local copy to save", true)
+	src := ""
+	if ok {
+		src = localFile(a)
+	}
+	if src == "" {
+		m.notify("No local copy to save — press d to download", true)
 		return nil
 	}
 	name := a.Filename
 	if name == "" {
-		name = filepath.Base(a.LocalPath)
+		name = filepath.Base(src)
 	}
-	src := a.LocalPath
 	return func() tea.Msg {
 		dst, err := copyToDownloads(src, name)
 		return attachmentSavedMsg{path: dst, err: err}

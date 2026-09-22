@@ -193,11 +193,24 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			if name == "" {
 				name = strings.ToLower(kind)
 			}
-			meta := size
+			meta := ""
 			if d := media.Dimensions(a.Width, a.Height); d != "" {
-				meta = d + " · " + meta
+				meta = d
 			}
-			for _, line := range []string{fmt.Sprintf("[ %s: %s ]", strings.ToLower(kind), name), meta, "v preview"} {
+			if a.Size > 0 {
+				if meta != "" {
+					meta += " · "
+				}
+				meta += size
+			}
+			if meta == "" {
+				meta = "metadata only"
+			}
+			hint := "d download"
+			if a.State == domain.AttachmentAvailable {
+				hint = "v preview"
+			}
+			for _, line := range []string{fmt.Sprintf("[ %s: %s ]", strings.ToLower(kind), name), meta, hint} {
 				wrapped = append(wrapped, ansi.Truncate(line, max(1, bw), "…"))
 			}
 		}
