@@ -197,7 +197,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 				// A glanceable inline size: big enough to recognise, small
 				// enough that a few images do not swallow the conversation.
 				// v opens the full-screen view for a closer look.
-				if lines, ok := media.TextImage(a.LocalPath, min(bw, 48), 20); ok {
+				if lines, ok := media.TextImage(a.LocalPath, min(bw, 24), 10); ok {
 					wrapped = append(wrapped, lines...)
 					continue
 				}
