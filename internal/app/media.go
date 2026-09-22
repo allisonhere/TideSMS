@@ -198,8 +198,10 @@ func (m *Model) renderMediaFullscreen() string {
 	if !ok {
 		return ""
 	}
-	cols := max(20, min(120, m.width-8))
-	rows := max(6, min(50, m.height-6))
+	// Aim for roughly 200x200 pixels where the pane allows it (~200 columns by
+	// 100 rows of half-height cells); smaller terminals scale down.
+	cols := max(20, min(200, m.width-8))
+	rows := max(6, min(100, m.height-6))
 	seq, ok := media.Render(m.graphics, localFile(a), cols, rows)
 	if !ok {
 		m.mediaPreview = false

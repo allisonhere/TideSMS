@@ -207,7 +207,9 @@ func halfBlocks(img image.Image, maxCols, maxRows int) []string {
 	if w < 1 || h < 1 {
 		return nil
 	}
-	cols := min(maxCols, w)
+	// Fill the requested width even when the source is small: a thumbnail is
+	// better shown large and soft than tiny and sharp.
+	cols := max(1, maxCols)
 	// A cell is roughly twice as tall as it is wide, so a cell pair of pixels
 	// keeps the aspect ratio.
 	rows := cols * h / (2 * w)
