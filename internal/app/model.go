@@ -498,6 +498,13 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Batch(m.saveDraft(v.draftKey, d), m.loadCache(), m.refreshCounts(), m.processQueue())
 			}
+			// The draft moved on after the message was captured. Queueing it is
+			// still what the user asked for; the newer text stays in the editor
+			// and we say so rather than silently appearing to duplicate.
+			if v.queued {
+				m.notify("Queued the captured text; your newer draft is kept", false)
+				return m, tea.Batch(m.loadCache(), m.refreshCounts(), m.processQueue())
+			}
 		}
 		if v.scheduled {
 			m.notify("Scheduled for "+v.when.Local().Format("Jan 2 3:04 PM"), false)
@@ -693,6 +700,11 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
+	case keys.Action:
+		if v == keys.ActionSchedule {
+			return m, m.openSchedule()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if m.quitting {
 			return m, nil

@@ -20,19 +20,26 @@ func fromMS(v int64) time.Time {
 
 // Enqueue inserts a new queued message.
 func (s *Store) Enqueue(i queue.Item) error {
-	_, err := s.db.Exec(`INSERT INTO outgoing_queue(id,device_id,thread_id,recipient,body,state,attempt_count,last_error,created_at,updated_at,last_attempt_at,next_attempt_at)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO outgoing_queue(id,device_id,thread_id,recipient,body,state,attempt_count,last_error,created_at,updated_at,last_attempt_at,next_attempt_at,offline_wait)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		i.ID, i.DeviceID, i.ThreadID, i.Recipient, i.Body, string(i.State), i.AttemptCount, i.LastError,
-		ms(i.CreatedAt), ms(i.UpdatedAt), ms(i.LastAttemptAt), ms(i.NextAttemptAt))
+		ms(i.CreatedAt), ms(i.UpdatedAt), ms(i.LastAttemptAt), ms(i.NextAttemptAt), boolInt(i.OfflineWait))
 	return err
 }
 
 // UpdateQueue writes the mutable fields of an item back. The id and creation
 // time are preserved.
 func (s *Store) UpdateQueue(i queue.Item) error {
-	_, err := s.db.Exec(`UPDATE outgoing_queue SET state=?, attempt_count=?, last_error=?, updated_at=?, last_attempt_at=?, next_attempt_at=? WHERE id=?`,
-		string(i.State), i.AttemptCount, i.LastError, ms(i.UpdatedAt), ms(i.LastAttemptAt), ms(i.NextAttemptAt), i.ID)
+	_, err := s.db.Exec(`UPDATE outgoing_queue SET state=?, attempt_count=?, last_error=?, updated_at=?, last_attempt_at=?, next_attempt_at=?, offline_wait=? WHERE id=?`,
+		string(i.State), i.AttemptCount, i.LastError, ms(i.UpdatedAt), ms(i.LastAttemptAt), ms(i.NextAttemptAt), boolInt(i.OfflineWait), i.ID)
 	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // ClaimQueue atomically moves an item from queued to sending. It returns false
@@ -87,7 +94,7 @@ func (s *Store) CountQueue(states ...queue.State) (int, error) {
 // so a reconnect sends queued messages immediately instead of waiting out the
 // timer.
 func (s *Store) ReleaseOfflineWaits() error {
-	_, err := s.db.Exec("UPDATE outgoing_queue SET next_attempt_at=0 WHERE state='queued' AND last_error='waiting for phone'")
+	_, err := s.db.Exec("UPDATE outgoing_queue SET next_attempt_at=0, offline_wait=0 WHERE state='queued' AND offline_wait=1")
 	return err
 }
 
@@ -98,7 +105,7 @@ func (s *Store) RemoveQueue(id string) error {
 }
 
 func (s *Store) queueWhere(where string, args []any) ([]queue.Item, error) {
-	rows, err := s.db.Query(`SELECT id,device_id,thread_id,recipient,body,state,attempt_count,last_error,created_at,updated_at,last_attempt_at,next_attempt_at FROM outgoing_queue `+where, args...)
+	rows, err := s.db.Query(`SELECT id,device_id,thread_id,recipient,body,state,attempt_count,last_error,created_at,updated_at,last_attempt_at,next_attempt_at,offline_wait FROM outgoing_queue `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +115,8 @@ func (s *Store) queueWhere(where string, args []any) ([]queue.Item, error) {
 		var i queue.Item
 		var state string
 		var created, updated, lastAttempt, next int64
-		if err = rows.Scan(&i.ID, &i.DeviceID, &i.ThreadID, &i.Recipient, &i.Body, &state, &i.AttemptCount, &i.LastError, &created, &updated, &lastAttempt, &next); err != nil {
+		var offlineWait int
+		if err = rows.Scan(&i.ID, &i.DeviceID, &i.ThreadID, &i.Recipient, &i.Body, &state, &i.AttemptCount, &i.LastError, &created, &updated, &lastAttempt, &next, &offlineWait); err != nil {
 			return nil, err
 		}
 		i.State = queue.State(state)
@@ -116,6 +124,7 @@ func (s *Store) queueWhere(where string, args []any) ([]queue.Item, error) {
 		i.UpdatedAt = fromMS(updated)
 		i.LastAttemptAt = fromMS(lastAttempt)
 		i.NextAttemptAt = fromMS(next)
+		i.OfflineWait = offlineWait != 0
 		out = append(out, i)
 	}
 	return out, rows.Err()

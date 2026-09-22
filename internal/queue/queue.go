@@ -31,6 +31,9 @@ type Item struct {
 	// The zero value means immediately.
 	NextAttemptAt time.Time
 	LastAttemptAt time.Time
+	// OfflineWait marks a delay caused by an unreachable phone rather than a
+	// failed attempt. A reconnect clears it and sends immediately.
+	OfflineWait bool
 }
 
 // Due reports whether the item may be attempted at now: queued, and past any

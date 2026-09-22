@@ -25,3 +25,6 @@ var MessageSearch string
 
 //go:embed 008_bubble_themes.sql
 var BubbleThemes string
+
+//go:embed 009_queue_offline_wait.sql
+var QueueOfflineWait string

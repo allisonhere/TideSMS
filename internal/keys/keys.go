@@ -8,6 +8,14 @@ import (
 	"strings"
 )
 
+// Action is a key the terminal reported only through a modified sequence that
+// Bubble Tea's KeyMsg cannot represent, such as Ctrl+Shift+Enter. The host
+// handles it as a first-class intent.
+type Action string
+
+// ActionSchedule is Ctrl+Shift+Enter.
+const ActionSchedule Action = "schedule"
+
 // Normalize handles Kitty CSI-u and xterm modifyOtherKeys without reinterpreting
 // bracketed paste, which Bubble Tea delivers as an ordinary KeyMsg.
 func Normalize(msg tea.Msg) tea.Msg {
@@ -51,8 +59,12 @@ func Normalize(msg tea.Msg) tea.Msg {
 		return msg
 	}
 	bits := mod - 1
+	shift := bits&1 != 0
 	alt := bits&2 != 0
 	ctrl := bits&4 != 0
+	if code == 13 && ctrl && shift {
+		return ActionSchedule
+	}
 	if code == 13 && ctrl {
 		return tea.KeyMsg{Type: tea.KeyF12}
 	}

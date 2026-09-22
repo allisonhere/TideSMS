@@ -33,6 +33,10 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	fail := func(e error) (*Store, error) { _ = db.Close(); return nil, e }
+	// WAL plus a busy timeout lets the TUI and the optional background service
+	// share the file: writers serialize, and a brief overlap waits rather than
+	// failing. Only one process should run the sender (see tidesms-daemon's
+	// lock file); claims keep delivery correct even if two do.
 	if _, err = db.Exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;"); err != nil {
 		return fail(err)
 	}
@@ -40,11 +44,11 @@ func Open(path string) (*Store, error) {
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 8 {
+	if version > 9 {
 		return fail(fmt.Errorf("database belongs to a newer TideSMS version"))
 	}
 
-	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants, migrations.QueueAndPreferences, migrations.MessageSearch, migrations.BubbleThemes} {
+	for v, script := range []string{migrations.Initial, migrations.Conversations, migrations.SyncedContacts, migrations.ContactMatch, migrations.GroupFromParticipants, migrations.QueueAndPreferences, migrations.MessageSearch, migrations.BubbleThemes, migrations.QueueOfflineWait} {
 		if version > v {
 			continue
 		}

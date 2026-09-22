@@ -66,6 +66,19 @@ func run() error {
 		return nil
 	}
 
+	// Only one sender may run against a state database. A second daemon (or a
+	// stray manual run) exits instead of competing for the same queue.
+	lockFile, err := os.OpenFile(paths.Database+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("cannot open lock file: %w", err)
+	}
+	defer func() { _ = lockFile.Close() }()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		fmt.Println("tidesms-daemon: another instance is already running")
+		return nil
+	}
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
+
 	store, err := storage.Open(paths.Database)
 	if err != nil {
 		return fmt.Errorf("cannot open SQLite: %w", err)

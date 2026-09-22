@@ -68,6 +68,29 @@ func TestQueueRoundTripAndClaimIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestOfflineWaitFlagRoundTrips(t *testing.T) {
+	s := openStore(t)
+	now := time.UnixMilli(1_700_000_000_000)
+	item := queue.Item{ID: "q1", DeviceID: "phone", Recipient: "+15551230000", Body: "hi", State: queue.Queued, CreatedAt: now, OfflineWait: true, NextAttemptAt: now.Add(time.Minute)}
+	if err := s.Enqueue(item); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.QueueItem("q1")
+	if err != nil || !ok || !got.OfflineWait {
+		t.Fatalf("offline flag lost: %+v ok=%v err=%v", got, ok, err)
+	}
+	if err := s.ReleaseOfflineWaits(); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ = s.QueueItem("q1")
+	if got.OfflineWait || !got.NextAttemptAt.IsZero() {
+		t.Fatalf("offline wait not cleared: %+v", got)
+	}
+	if due, _ := s.DueQueue(now, 10); len(due) != 1 {
+		t.Fatal("item should be due after the offline wait clears")
+	}
+}
+
 func TestScheduledRoundTripAndClaim(t *testing.T) {
 	s := openStore(t)
 	now := time.UnixMilli(1_700_000_000_000)

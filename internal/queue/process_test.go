@@ -118,6 +118,9 @@ func TestProcessorOfflineDoesNotSpendAttempts(t *testing.T) {
 	if i.State != Queued || i.AttemptCount != 0 {
 		t.Fatalf("offline should not count: %+v", i)
 	}
+	if !i.OfflineWait {
+		t.Fatal("offline wait should be flagged, not inferred from the error text")
+	}
 	if i.NextAttemptAt.IsZero() {
 		t.Fatal("offline should schedule a short retry")
 	}

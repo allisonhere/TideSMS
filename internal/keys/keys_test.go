@@ -18,6 +18,17 @@ func TestModifiedKeys(t *testing.T) {
 		}
 	}
 }
+func TestCtrlShiftEnterIsSchedule(t *testing.T) {
+	if got := Normalize(csi("13;6u")); got != ActionSchedule {
+		t.Fatalf("ctrl+shift+enter = %v, want schedule", got)
+	}
+	// Ctrl+Enter alone is still the submit fallback.
+	got := Normalize(csi("13;5u")).(tea.KeyMsg)
+	if got.Type != tea.KeyF12 {
+		t.Fatalf("ctrl+enter = %v", got)
+	}
+}
+
 func TestPasteIsNeverACommand(t *testing.T) {
 	k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("\x1b[13;5u"), Paste: true}
 	got := Normalize(k).(tea.KeyMsg)

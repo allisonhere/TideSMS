@@ -553,7 +553,9 @@ func (m *Model) sendOutboxEntry(now bool) tea.Cmd {
 				if err := os.UpdateScheduled(item); err != nil {
 					return outboxChangedMsg{err: err}
 				}
-				return queueProcessedMsg{}
+				// outboxChangedMsg runs a processing pass, so "send now" takes
+				// effect immediately instead of waiting for the next tick.
+				return outboxChangedMsg{}
 			}
 			it, found, err := os.QueueItem(id)
 			if err != nil || !found {
@@ -564,7 +566,7 @@ func (m *Model) sendOutboxEntry(now bool) tea.Cmd {
 			if err := os.UpdateQueue(it); err != nil {
 				return outboxChangedMsg{err: err}
 			}
-			return queueProcessedMsg{}
+			return outboxChangedMsg{}
 		}
 	}
 	// Not forcing a send: just close.

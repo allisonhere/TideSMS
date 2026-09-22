@@ -86,13 +86,16 @@ func (p *Processor) attempt(ctx context.Context, item Item, now time.Time) Resul
 		item.State = Sent
 		item.LastError = ""
 		item.NextAttemptAt = time.Time{}
+		item.OfflineWait = false
 	case errors.Is(err, ErrOffline):
 		// Not a failure: undo the attempt bump and wait without spending budget.
 		item.State = Queued
 		item.AttemptCount--
 		item.LastError = "waiting for phone"
 		item.NextAttemptAt = now.Add(offlineRetry)
+		item.OfflineWait = true
 	default:
+		item.OfflineWait = false
 		item.LastError = err.Error()
 		if p.MaxAttempts > 0 && item.AttemptCount >= p.MaxAttempts {
 			item.State = Failed
