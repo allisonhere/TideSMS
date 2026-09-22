@@ -616,8 +616,13 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		m.modal = "message"
 		m.choice = 0
 		m.choices = []string{"Copy", "Reply", "Quote", "Search text", "Delete local copy"}
-		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {
-			m.choices = append(m.choices, "Retry")
+		if msg := h.view.Current(); msg != nil {
+			if msg.HasMedia() {
+				m.choices = append(m.choices, "View attachment")
+			}
+			if msg.Status == domain.Failed && msg.BackendID == "" {
+				m.choices = append(m.choices, "Retry")
+			}
 		}
 		m.choices = append(m.choices, "Close")
 	case "y":

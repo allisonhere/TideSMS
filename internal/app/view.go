@@ -9,6 +9,7 @@ import (
 	"github.com/allisonhere/tidesms/ui/components"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/x/ansi"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,6 +54,13 @@ func (m *Model) sizeEditor() {
 func (m *Model) View() string {
 	if !m.ready {
 		return ""
+	}
+	// The inline image replaces the whole frame rather than composing into a
+	// panel, so its escape sequence is never measured as text.
+	if m.mediaPreview {
+		if s := m.renderMediaFullscreen(); s != "" {
+			return s
+		}
 	}
 	if m.history.enabled {
 		return m.historyView()
@@ -164,6 +172,14 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	case "delete-message":
 		title = "Delete local copy"
 		body = "Delete this cached copy?\nThe phone's own message is not touched, and a synced copy may\nreappear after the next sync.\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16))
+		hint = "Enter confirm · Esc cancel"
+	case "media":
+		title = m.mediaTitle()
+		body = m.mediaViewerLines() + "\n" + r.Styles.DetailMeta.Render("←/→ next · v preview · o open · s save · c copy path · Esc close")
+		hint = "Esc close"
+	case "open-attachment":
+		title = "Open externally"
+		body = "Open this file with the desktop's default app?\n\n" + filepath.Base(m.pendingOpenPath) + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16))
 		hint = "Enter confirm · Esc cancel"
 	case "search-all":
 		title = "Search messages"

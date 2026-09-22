@@ -98,12 +98,6 @@ func decodeMessage(device string, v dbus.Variant) (domain.Message, error) {
 		m.Sender = "You"
 		m.Unread = false
 	}
-	if len(w.Attachments) > 0 {
-		if m.Body != "" {
-			m.Body += "\n"
-		}
-		m.Body += "[Attachment]"
-	}
 	m.ID = m.StableID()
 	// Attachments are metadata-only until fetched; the message renders without
 	// waiting for them.

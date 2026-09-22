@@ -129,6 +129,14 @@ Privacy is enforced per conversation. **Ctrl+P → Change AI policy** (contact) 
 
 The queued, sending, sent, failed and paused states are persisted, and a message caught mid-send when the process dies is paused rather than retried blindly. The TUI drains the queue itself while it is open; the optional `tidesms-daemon` does the same while it is closed, and both share `internal/queue`, `internal/scheduler` and `internal/messaging`.
 
+## Media and attachments
+
+Media is capability-gated: the interface only offers what the backend reports it can carry. KDE Connect's SMS plugin delivers received attachments as metadata (kind, size, dimensions) but does not hand over the file, so TideSMS never promises an open or save it cannot honour. `backend.Capabilities` records `SendText`, `ReceiveText`, `Groups`, `ReceiveMedia`, `SendMedia`, `DeliveryStatus` and `ContactSync`, and media sending and delivery receipts stay false for KDE Connect.
+
+A message with media shows a compact block after its body — `[ image: dinner.jpg ]`, the dimensions and size, and a preview hint — and the conversation never waits on a download. **Enter** on the message, then **View attachment**, opens a viewer that lists each part with its kind and state. There, **←/→** move between parts, **v** draws the image inline when the terminal supports it, **o** opens it externally (after an explicit confirmation), **s** copies it to the download directory without overwriting, and **c** copies its path.
+
+Inline drawing uses the Kitty graphics protocol or iTerm2 inline images, detected from the environment; Sixel is recognised but not drawn. With no graphics support, or no local file, the viewer stays a text list and open/save remain disabled rather than broken. Files are never opened or executed automatically.
+
 ## Global search
 
 **Ctrl+F**, or **Ctrl+P → Search all messages**, searches every cached message at once. The index is SQLite FTS5 over message bodies, kept in step by triggers, so search stays fast with tens of thousands of messages and never scans the table. Results show the person, date and a snippet.

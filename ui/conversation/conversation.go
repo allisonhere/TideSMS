@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/media"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/lipgloss"
@@ -179,6 +180,22 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			bw = max(1, min(bw, opts.MaxWidth))
 		}
 		wrapped := strings.Split(ansi.Wrap(body, max(1, bw), ""), "\n")
+		// Attachments render as a compact block after the body, so media never
+		// blocks the conversation and needs no local file to be listed.
+		for _, a := range msg.Attachments {
+			kind, size := media.Describe(a.MIMEType, a.Filename, a.Size)
+			name := a.Filename
+			if name == "" {
+				name = strings.ToLower(kind)
+			}
+			meta := size
+			if d := media.Dimensions(a.Width, a.Height); d != "" {
+				meta = d + " · " + meta
+			}
+			for _, line := range []string{fmt.Sprintf("[ %s: %s ]", strings.ToLower(kind), name), meta, "Enter to preview"} {
+				wrapped = append(wrapped, ansi.Truncate(line, max(1, bw), "…"))
+			}
+		}
 		content := 0
 		for _, line := range wrapped {
 			content = max(content, ansi.StringWidth(line))

@@ -305,6 +305,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		return m.globalSearchKey(k)
 	case "contact":
 		return m.contactDetailsKey(k)
+	case "media":
+		return m.mediaKey(k)
 	}
 	if k.String() == "esc" {
 		m.modal = ""
@@ -412,6 +414,9 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 				m.openGlobalSearch()
 				m.searchInput.SetValue(msg.Body)
 				return m.runGlobalSearch()
+			case "View attachment":
+				m.openMediaViewer(*msg)
+				return nil
 			case "Delete local copy":
 				m.deleteMsgID = msg.ID
 				m.modal = "delete-message"
@@ -431,6 +436,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 			return m.deleteLocalCopy(m.deleteMsgID)
+		case "open-attachment":
+			return m.resolveOpenAttachment(m.choices[m.choice])
 		case "compose":
 			if m.choice < len(m.picks) {
 				return m.pickRecipient(m.picks[m.choice])

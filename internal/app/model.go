@@ -7,7 +7,9 @@ import (
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/config"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/keys"
+	"github.com/allisonhere/tidesms/internal/media"
 	"github.com/allisonhere/tidesms/internal/notifications"
 	"github.com/allisonhere/tidesms/internal/search"
 	"github.com/allisonhere/tidesms/internal/storage"
@@ -16,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -98,6 +101,14 @@ type Model struct {
 	searchRev     uint64
 	// deleteMsgID is the message awaiting Delete-local-copy confirmation.
 	deleteMsgID string
+	// Media viewer: the attachments of one message, the highlighted part, and
+	// whether the terminal can draw images inline.
+	mediaAtts       []domain.Attachment
+	mediaIndex      int
+	mediaMsgID      string
+	graphics        media.Protocol
+	mediaPreview    bool
+	pendingOpenPath string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry
@@ -162,6 +173,7 @@ func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config
 	m.searchInput = textinput.New()
 	m.searchInput.CharLimit = 120
 	m.searchInput.Placeholder = "Search all messages…"
+	m.graphics = media.Detect(os.Getenv)
 	m.assistant = buildAssistant(c)
 	if startupError != nil {
 		m.configLocked = true
@@ -549,6 +561,19 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case countsMsg:
 		m.queuedCount, m.scheduledCount = v.queued, v.scheduled
+		return m, nil
+	case attachmentOpenedMsg:
+		if v.err != nil {
+			m.notify("Could not open the file", true)
+		}
+		return m, nil
+	case attachmentSavedMsg:
+		if v.err != nil {
+			m.notify("Could not save the file", true)
+			m.logError("save attachment", v.err)
+		} else {
+			m.notify("Saved to "+v.path, false)
+		}
 		return m, nil
 	case editOutboxMsg:
 		return m, tea.Batch(m.prepareEdit(v), m.refreshCounts())
