@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/domain"
-	"github.com/allisonhere/tidesms/internal/media"
 	"github.com/godbus/dbus/v5"
 	"os"
 	"path/filepath"
@@ -103,46 +102,56 @@ func decodeMessage(device string, v dbus.Variant) (domain.Message, error) {
 		m.Unread = false
 	}
 	m.ID = m.StableID()
-	// The plugin's "thumbnail" is not a path: it is a base64 image. Materialise
-	// it so the viewer has something to draw, and leave the full file for an
-	// on-demand fetch. A message renders without waiting either way.
-	for _, a := range w.Attachments {
-		local, state := thumbnailFile(m.ID, a.PartID, a.Thumbnail)
-		w, h := 0, 0
-		if local != "" {
-			if iw, ih, ok := media.ImageSize(local); ok {
-				w, h = iw, ih
-			}
-		}
-		m.Attachments = append(m.Attachments, domain.Attachment{
-			ID:        m.ID + ":" + strconv.FormatInt(a.PartID, 10),
-			MessageID: m.ID,
-			MIMEType:  a.MIME,
-			RemoteID:  a.Identifier,
-			PartID:    a.PartID,
-			LocalPath: local,
-			Width:     w,
-			Height:    h,
-			State:     state,
-		})
-	}
+	m.Attachments = attachmentsFor(m.ID, w.Attachments)
 	return m, nil
 }
 
-// thumbnailFile turns the plugin's thumbnail into a real file. It may be an
-// existing path or a bare base64 image; anything else is ignored rather than
-// stored as a bogus path.
-func thumbnailFile(messageID string, partID int64, thumb string) (string, domain.AttachmentState) {
+// attachmentsFor maps the plugin's parts onto the domain model.
+//
+// The plugin's "thumbnail" is not a path: it is a base64 image, and a small one
+// — KDE Connect sends 100x100. It is materialised so the conversation has
+// something to draw immediately, but deliberately kept out of LocalPath. It is
+// a preview of the part, not the part: recording it as the attachment's file
+// made the conversation draw a 100x100 image and made a download refuse as
+// already done, so the image that was actually sent could never be reached.
+func attachmentsFor(messageID string, parts []wireAttachment) []domain.Attachment {
+	var out []domain.Attachment
+	for _, a := range parts {
+		out = append(out, domain.Attachment{
+			ID:        messageID + ":" + strconv.FormatInt(a.PartID, 10),
+			MessageID: messageID,
+			MIMEType:  a.MIME,
+			RemoteID:  a.Identifier,
+			PartID:    a.PartID,
+			ThumbPath: thumbnailFile(messageID, a.PartID, a.Thumbnail),
+			// Width and Height describe the part, and the thumbnail's own size
+			// says nothing about it. They are filled in when the file arrives
+			// rather than reported as the preview's 100x100.
+			State: domain.AttachmentMetadata,
+		})
+	}
+	return out
+}
+
+// thumbnailFile turns the plugin's thumbnail into a real file and returns its
+// path, or "" when there is nothing usable. It may arrive as an existing path
+// or as a bare base64 image; anything else is ignored rather than stored as a
+// bogus path.
+//
+// It deliberately reports no attachment state. A thumbnail says nothing about
+// whether the part has been fetched, and treating one as an available
+// attachment is what previously hid the real image behind a preview.
+func thumbnailFile(messageID string, partID int64, thumb string) string {
 	if thumb == "" {
-		return "", domain.AttachmentMetadata
+		return ""
 	}
 	if _, err := os.Stat(thumb); err == nil {
-		return thumb, domain.AttachmentAvailable
+		return thumb
 	}
 	key := strings.ReplaceAll(messageID, ":", "_") + "_" + strconv.FormatInt(partID, 10)
 	dir := filepath.Join(os.TempDir(), "tidesms-thumbnails")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", domain.AttachmentMetadata
+		return ""
 	}
 	ext := ".png"
 	if strings.HasPrefix(thumb, "/9j/") {
@@ -155,13 +164,13 @@ func thumbnailFile(messageID string, partID int64, thumb string) (string, domain
 			data, decErr = base64.RawStdEncoding.DecodeString(thumb)
 		}
 		if decErr != nil || len(data) == 0 {
-			return "", domain.AttachmentMetadata
+			return ""
 		}
 		if err := os.WriteFile(path, data, 0600); err != nil {
-			return "", domain.AttachmentMetadata
+			return ""
 		}
 	}
-	return path, domain.AttachmentAvailable
+	return path
 }
 func connect(ctx context.Context) (*dbus.Conn, error) {
 	conn, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))

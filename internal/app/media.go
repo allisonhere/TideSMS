@@ -14,6 +14,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// measureTerminal re-reads what the terminal can draw and how large a cell is.
+// Both are needed before an image can be placed in the conversation, and the
+// cell size is re-read on every resize because moving a window between displays
+// of different scales changes it without changing the column count.
+func (m *Model) measureTerminal() {
+	m.graphics = media.Detect(os.Getenv)
+	if w, h, ok := media.CellPixels(os.Stdout.Fd()); ok {
+		m.cellW, m.cellH = w, h
+	}
+}
+
+// inlineGraphics reports whether the conversation should place real images. The
+// braille fallback covers every other terminal, so this only has to be true
+// where the protocol genuinely works.
+func (m *Model) inlineGraphics() bool {
+	return m.cfg.Conversation.InlineMedia && media.Placeholders(m.graphics)
+}
+
 // attachmentOpenedMsg reports the outcome of an external open.
 type attachmentOpenedMsg struct{ err error }
 
@@ -47,6 +65,29 @@ func localFile(a domain.Attachment) string {
 		return a.LocalPath
 	}
 	return ""
+}
+
+// thumbFile returns the backend's preview if it is still on disk. Thumbnails
+// live in the temporary directory, so one recorded in an earlier run may be
+// gone; a missing file is simply no preview.
+func thumbFile(a domain.Attachment) string {
+	if a.ThumbPath == "" {
+		return ""
+	}
+	if fi, err := os.Stat(a.ThumbPath); err == nil && !fi.IsDir() {
+		return a.ThumbPath
+	}
+	return ""
+}
+
+// previewFile returns the best image on disk and whether it is the real part.
+// The conversation draws whatever this gives it so a message shows something
+// straight away, while the caller can still tell a preview from the image.
+func previewFile(a domain.Attachment) (string, bool) {
+	if p := localFile(a); p != "" {
+		return p, true
+	}
+	return thumbFile(a), false
 }
 
 func (m *Model) currentAttachment() (domain.Attachment, bool) {
@@ -92,14 +133,37 @@ func (m *Model) mediaKey(k tea.KeyMsg) tea.Cmd {
 	case "d":
 		return m.fetchAttachment()
 	case "v":
-		a, ok := m.currentAttachment()
-		if !ok || localFile(a) == "" {
-			m.notify("No local copy to view — press d to download", true)
-			return nil
-		}
-		return externalPreview(localFile(a))
+		return m.previewAttachment()
 	}
 	return nil
+}
+
+// previewAttachment shows the part at full size. It fetches the real file
+// first when only a thumbnail is on disk: the backend's preview is 100x100, so
+// opening a full-screen view on it would show a blur, and the point of the
+// view is to see the image. The thumbnail is never used as a stand-in here —
+// the fetch is cheap, and a view that silently showed the preview instead is
+// what hid the real image in the first place.
+func (m *Model) previewAttachment() tea.Cmd {
+	a, ok := m.currentAttachment()
+	if !ok {
+		return nil
+	}
+	if path := localFile(a); path != "" {
+		return externalPreview(path)
+	}
+	if _, isAttachmentBackend := m.backend.(backend.AttachmentBackend); !isAttachmentBackend {
+		// No way to fetch the part, so the preview is all there is. Better a
+		// small image than nothing, as long as it is described as a preview.
+		if thumb := thumbFile(a); thumb != "" {
+			m.notify("Showing the preview; this backend cannot fetch the full image", true)
+			return externalPreview(thumb)
+		}
+		m.notify("This backend cannot fetch attachments", true)
+		return nil
+	}
+	m.previewAfterFetch = a.ID
+	return m.fetchAttachment()
 }
 
 // externalPreview suspends the TUI and lets the binary draw the image on the
@@ -129,13 +193,18 @@ func (m *Model) fetchAttachment() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	// Only the part itself counts as downloaded. A thumbnail sitting in
+	// ThumbPath is a preview the backend volunteered, and refusing the fetch
+	// because of it would leave the real image permanently out of reach.
 	if localFile(a) != "" {
 		m.notify("Already downloaded", false)
+		m.previewAfterFetch = ""
 		return nil
 	}
 	b, ok := m.backend.(backend.AttachmentBackend)
 	if !ok {
 		m.notify("This backend cannot fetch attachments", true)
+		m.previewAfterFetch = ""
 		return nil
 	}
 	ctx := m.ctx
@@ -152,6 +221,8 @@ func (m *Model) fetchAttachment() tea.Cmd {
 
 // applyFetchedAttachment records a downloaded part in memory and on disk.
 func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
+	wanted := m.previewAfterFetch == v.id
+	m.previewAfterFetch = ""
 	if v.err != nil || v.path == "" {
 		m.notify("Could not fetch the attachment", true)
 		return nil
@@ -166,15 +237,24 @@ func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
 		}
 	}
 	m.notify("Attachment ready", false)
+	var record tea.Cmd
 	if s, ok := m.store.(interface {
 		SetAttachmentState(string, domain.AttachmentState, string) error
 	}); ok {
-		return func() tea.Msg {
+		record = func() tea.Msg {
 			_ = s.SetAttachmentState(v.id, domain.AttachmentAvailable, v.path)
 			return nil
 		}
 	}
-	return nil
+	if !wanted {
+		return record
+	}
+	// v asked for this file. Record the download first, then suspend for the
+	// viewer, so the write is not left racing a process that takes the terminal.
+	if record == nil {
+		return externalPreview(v.path)
+	}
+	return tea.Sequence(record, externalPreview(v.path))
 }
 
 // mediaViewerLines is the text shown when no image is drawn.
@@ -199,12 +279,23 @@ func (m *Model) mediaViewerLines() string {
 	local := localFile(a)
 	if local != "" {
 		fmt.Fprintf(&b, "File: %s\n", local)
-	} else {
-		b.WriteString("No local copy: press d to download\n")
-	}
-	if local != "" {
 		b.WriteString("v opens the image\n")
+		return b.String()
 	}
+	// Say plainly that what the conversation is showing is the backend's small
+	// preview, not the image, so the size on screen is not mistaken for the
+	// size that was sent.
+	if thumb := thumbFile(a); thumb != "" {
+		meta := "preview only"
+		if w, h, ok := media.ImageSize(thumb); ok {
+			meta = "preview only · " + media.Dimensions(w, h)
+		}
+		fmt.Fprintf(&b, "%s\n", meta)
+		b.WriteString("v downloads and opens the full image\n")
+		return b.String()
+	}
+	b.WriteString("No local copy: press d to download\n")
+	b.WriteString("v downloads and opens the full image\n")
 	return b.String()
 }
 

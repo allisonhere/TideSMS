@@ -16,18 +16,49 @@ import (
 func TestThumbnailFileMaterialisesBase64(t *testing.T) {
 	// A 1x1 PNG, base64, as the plugin's thumbnail field carries it.
 	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
-	path, state := thumbnailFile("msg:1", 7, b64)
-	if state != domain.AttachmentAvailable || path == "" {
-		t.Fatalf("thumbnail not materialised: %q %v", path, state)
+	path := thumbnailFile("msg:1", 7, b64)
+	if path == "" {
+		t.Fatal("thumbnail not materialised")
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("thumbnail file missing: %v", err)
 	}
-	if _, state := thumbnailFile("m", 1, "not!!base64"); state != domain.AttachmentMetadata {
-		t.Fatal("garbage thumbnail should not become a path")
+	if got := thumbnailFile("m", 1, "not!!base64"); got != "" {
+		t.Fatalf("garbage thumbnail should not become a path, got %q", got)
 	}
-	if _, state := thumbnailFile("m", 1, ""); state != domain.AttachmentMetadata {
-		t.Fatal("empty thumbnail should stay metadata-only")
+	if got := thumbnailFile("m", 1, ""); got != "" {
+		t.Fatalf("empty thumbnail should yield no path, got %q", got)
+	}
+}
+
+// A thumbnail is a preview of the part, never the part. Recording it as the
+// attachment's local file is what previously made the conversation draw a
+// 100x100 image and made a download refuse as already done, putting the real
+// image out of reach.
+func TestThumbnailIsNotTreatedAsTheAttachment(t *testing.T) {
+	const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
+	atts := attachmentsFor("msg:42", []wireAttachment{
+		{PartID: 7, MIME: "image/png", Thumbnail: b64, Identifier: "uid-7"},
+	})
+	if len(atts) != 1 {
+		t.Fatalf("got %d attachments, want 1", len(atts))
+	}
+	a := atts[0]
+	if a.ThumbPath == "" {
+		t.Error("the thumbnail was not kept as a preview")
+	}
+	if a.LocalPath != "" {
+		t.Errorf("the thumbnail was recorded as the part itself: %q", a.LocalPath)
+	}
+	if a.State == domain.AttachmentAvailable {
+		t.Error("a part with only a thumbnail was reported as available, which refuses the download")
+	}
+	// The thumbnail's own size says nothing about the image that was sent.
+	if a.Width != 0 || a.Height != 0 {
+		t.Errorf("dimensions %dx%d were taken from the thumbnail", a.Width, a.Height)
+	}
+	if path, full := a.Preview(); path != a.ThumbPath || full {
+		t.Errorf("Preview() = %q full=%v, want the thumbnail reported as not full", path, full)
 	}
 }
 

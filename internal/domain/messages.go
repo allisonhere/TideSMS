@@ -96,7 +96,9 @@ const (
 	AttachmentMetadata AttachmentState = "metadata"
 	// AttachmentDownloading is in progress.
 	AttachmentDownloading AttachmentState = "downloading"
-	// AttachmentAvailable is present at LocalPath.
+	// AttachmentAvailable means the part itself is present at LocalPath. A
+	// backend thumbnail does not earn this state: it is a preview of the part,
+	// not the part, so a fetch is still worth offering.
 	AttachmentAvailable AttachmentState = "available"
 	// AttachmentFailed could not be fetched.
 	AttachmentFailed AttachmentState = "failed"
@@ -106,11 +108,27 @@ const (
 type Attachment struct {
 	ID, MessageID, MIMEType, Filename string
 	Size                              int64
-	LocalPath, RemoteID               string
+	// LocalPath is the part itself, once fetched. ThumbPath is the small
+	// preview a backend sends alongside the message list — KDE Connect's is
+	// 100x100 — materialised as a file. Keeping them apart is what lets the
+	// conversation show something immediately while still knowing the real
+	// image has never been downloaded.
+	LocalPath, ThumbPath, RemoteID string
 	// PartID is the backend's part number, used to request the file.
 	PartID        int64
 	Width, Height int
 	State         AttachmentState
+}
+
+// Preview returns the best image on disk for this part: the part itself when
+// it has been fetched, otherwise the backend's thumbnail. It reports whether
+// the path is the real part, so a caller can say so rather than passing a
+// preview off as the image.
+func (a Attachment) Preview() (path string, full bool) {
+	if a.LocalPath != "" {
+		return a.LocalPath, true
+	}
+	return a.ThumbPath, false
 }
 
 // HasMedia reports whether a message carries any attachment.

@@ -9,6 +9,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/keys"
+	"github.com/allisonhere/tidesms/internal/media"
 	"github.com/allisonhere/tidesms/internal/notifications"
 	"github.com/allisonhere/tidesms/internal/search"
 	"github.com/allisonhere/tidesms/internal/storage"
@@ -41,16 +42,22 @@ type Repository interface {
 	DeleteMessage(string) error
 }
 type Model struct {
-	history                                         historyState
-	editorEpoch                                     uint64
-	store                                           Repository
-	backend                                         backend.MessagingBackend
-	log                                             *slog.Logger
-	cfg                                             config.Config
-	configPath                                      string
-	configLocked                                    bool
-	ctx                                             context.Context
-	width, height                                   int
+	history       historyState
+	editorEpoch   uint64
+	store         Repository
+	backend       backend.MessagingBackend
+	log           *slog.Logger
+	cfg           config.Config
+	configPath    string
+	configLocked  bool
+	ctx           context.Context
+	width, height int
+	// graphics is the terminal's image protocol and cellW/cellH its cell size
+	// in pixels, both re-read on resize: a window moved to a display with a
+	// different scale changes the cell size, and an image sized to the old one
+	// would no longer keep its proportions.
+	graphics                                        media.Protocol
+	cellW, cellH                                    int
 	ready, loaded, focus, searching, busy, quitting bool
 	contacts                                        []contacts.Contact
 	synced                                          []contacts.Synced
@@ -105,6 +112,9 @@ type Model struct {
 	mediaIndex      int
 	mediaMsgID      string
 	pendingOpenPath string
+	// previewAfterFetch is the attachment id v is waiting on, so the viewer
+	// opens by itself once the real file has been downloaded.
+	previewAfterFetch string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry
@@ -578,6 +588,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = v.Width
 		m.height = v.Height
 		m.ready = true
+		m.measureTerminal()
 		m.sizeEditor()
 		return m, nil
 	case loadedMsg:

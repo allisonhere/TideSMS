@@ -40,3 +40,6 @@ var AttachmentPartID string
 
 //go:embed 013_clear_bad_attachment_paths.sql
 var ClearBadAttachmentPaths string
+
+//go:embed 014_attachment_thumbnails.sql
+var AttachmentThumbnails string

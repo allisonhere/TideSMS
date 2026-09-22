@@ -448,3 +448,54 @@ func TestInlineMediaRendersHalfBlocks(t *testing.T) {
 		t.Fatalf("compact block missing:\n%s", ansi.Strip(block))
 	}
 }
+
+// With the graphics protocol available the real image is drawn instead of
+// braille, and the escapes that carry it are handed to the caller rather than
+// buried in the pane content, which pads and truncates everything it holds.
+func TestInlineMediaPlacesRealImage(t *testing.T) {
+	msg := message(domain.Incoming, "pic")
+	msg.Attachments = []domain.Attachment{{
+		ID: "a1", MessageID: msg.ID, MIMEType: "image/png", LocalPath: convTempPNG(t),
+		Width: 4, Height: 2, State: domain.AttachmentAvailable,
+	}}
+	r := tideui.NewRenderer(themes.Resolve("tide", "", ""), tideui.StyleOptions{})
+	m := New()
+	m.SetMessages([]domain.Message{msg})
+	m.Layout(r, 60, 20, Options{Timestamps: "smart", InlineMedia: true, Graphics: true, CellWidth: 7, CellHeight: 16})
+	rendered := strings.Join(strings.Split(m.View(r, true), "\n"), "\n")
+
+	if !strings.ContainsRune(rendered, 0x10EEEE) {
+		t.Fatalf("no placeholder cells drawn:\n%s", ansi.Strip(rendered))
+	}
+	if strings.ContainsFunc(rendered, func(r rune) bool { return r >= 0x2800 && r <= 0x28FF }) {
+		t.Error("braille art drawn even though the terminal can place the image")
+	}
+	transmit := m.Transmissions()
+	if !strings.Contains(transmit, "\x1b_Ga=T,U=1,i=") {
+		t.Errorf("no image transmission offered: %q", transmit)
+	}
+	// The transmission must not travel inside the pane, where truncation and
+	// padding would cut it apart.
+	if strings.Contains(rendered, transmit) {
+		t.Error("the transmission was rendered into the pane content")
+	}
+}
+
+// An image is laid out as plain text: the bubble around it is measured from the
+// placeholder cells, so it must close at the same width it would for letters.
+func TestPlacedImageKeepsBubbleWidth(t *testing.T) {
+	msg := message(domain.Incoming, "pic")
+	msg.Attachments = []domain.Attachment{{
+		ID: "a1", MessageID: msg.ID, MIMEType: "image/png", LocalPath: convTempPNG(t),
+		Width: 4, Height: 2, State: domain.AttachmentAvailable,
+	}}
+	opts := Options{Timestamps: "smart", InlineMedia: true, Graphics: true, CellWidth: 7, CellHeight: 16, Bubbles: true, Corners: "round"}
+	for _, width := range []int{40, 60, 100} {
+		lines := renderOpts(t, []domain.Message{msg}, width, 20, opts)
+		for i, line := range lines {
+			if w := ansi.StringWidth(line); w > width {
+				t.Errorf("width %d: line %d measures %d columns:\n%s", width, i, w, ansi.Strip(line))
+			}
+		}
+	}
+}

@@ -37,8 +37,9 @@ type Config struct {
 		// two directions. Empty keeps the surface derived from the pane theme.
 		IncomingTheme string `toml:"incoming_theme"`
 		OutgoingTheme string `toml:"outgoing_theme"`
-		// InlineMedia draws a downloaded image as half-block text in the
-		// conversation rather than only in the viewer.
+		// InlineMedia draws a downloaded image in the conversation rather than
+		// only in the viewer: the real image where the terminal speaks the
+		// Kitty graphics protocol, braille dots everywhere else.
 		InlineMedia bool `toml:"inline_media"`
 	} `toml:"conversation"`
 

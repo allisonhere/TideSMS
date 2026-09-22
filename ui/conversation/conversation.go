@@ -36,10 +36,19 @@ type Options struct {
 	// HighlightID marks a message the user jumped to, so it stands out briefly
 	// from the messages around it. It styles only the sender line.
 	HighlightID string
-	// InlineMedia draws a local image as half-block art inside the message
-	// instead of a text block.
-	InlineMedia       bool
-	Timestamps, Query string
+	// InlineMedia draws a local image inside the message instead of a text
+	// block, as braille art unless Graphics is also set.
+	InlineMedia bool
+	// Graphics draws a local image with the terminal's own graphics protocol
+	// rather than as text. The drawn cells are ordinary text, so the pane still
+	// pads, truncates and scrolls them, but each frame must be accompanied by
+	// the escapes Transmissions reports.
+	Graphics bool
+	// CellWidth and CellHeight are the terminal's cell size in pixels, which is
+	// what gives a placed image its own proportions. Zero assumes a cell twice
+	// as tall as it is wide.
+	CellWidth, CellHeight int
+	Timestamps, Query     string
 }
 type Model struct {
 	Messages                        []domain.Message
@@ -47,8 +56,15 @@ type Model struct {
 	Follow                          bool
 	lines                           []string
 	starts, ends                    []int
+	transmissions                   []string
 	Options                         Options
 }
+
+// Transmissions returns the graphics escapes for the images the last Layout
+// placed. They carry no width and must be written outside the pane, ahead of
+// the frame: a pane pads and truncates its content, and an image has to reach
+// the terminal whole.
+func (m *Model) Transmissions() string { return strings.Join(m.transmissions, "") }
 
 // Cells reserved around every bubble: the selection marker View prepends, the
 // "│ " gutter, and a margin that keeps text off the pane border.
@@ -62,7 +78,33 @@ const (
 	// Below this the frame's four cells leave too little room for text, so the
 	// plain gutter is used instead.
 	minBubbleWidth = 24
+	// An inline image is a thumbnail, not the message: it stays small enough
+	// that the conversation around it is still readable, and v opens the full
+	// image. The row cap only binds on an image taller than it is wide.
+	inlineImageCols    = 24
+	inlineImageRows    = 10
+	inlineImageMaxRows = 20
 )
+
+// placeImage draws one image with the terminal's graphics protocol, returning
+// the transmission escape and the cells that show it. It reports false for a
+// file that is not a decodable image, so the caller falls back to text.
+func placeImage(path string, bw int, opts Options) (string, []string, bool) {
+	if path == "" {
+		return "", nil, false
+	}
+	iw, ih, ok := media.ImageBounds(path)
+	if !ok {
+		return "", nil, false
+	}
+	// ViewerBox rather than PlacementBox: an image smaller than the thumbnail
+	// footprint is drawn at its own size instead of being blown up to fill it.
+	cols, rows := media.ViewerBox(iw, ih, min(bw, inlineImageCols), inlineImageMaxRows, opts.CellWidth, opts.CellHeight)
+	if cols < 1 || rows < 1 {
+		return "", nil, false
+	}
+	return media.InlineImage(path, cols, rows)
+}
 
 func New() Model { return Model{Follow: true} }
 func (m *Model) SetMessages(ms []domain.Message) {
@@ -136,6 +178,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 	m.lines = nil
 	m.starts = nil
 	m.ends = nil
+	m.transmissions = nil
 	lastDate := ""
 	boundary := false
 	for _, msg := range m.Messages {
@@ -191,13 +234,24 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		// Attachments render as a compact block after the body, so media never
 		// blocks the conversation and needs no local file to be listed.
 		for _, a := range msg.Attachments {
-			// A local image can be drawn as text right here; anything else, or
-			// an image not yet downloaded, keeps the compact block.
+			// Whichever image is on disk can be drawn as text right here: the
+			// part once fetched, otherwise the backend's thumbnail, so a message
+			// shows something without waiting on a download. Anything else keeps
+			// the compact block.
 			if opts.InlineMedia {
-				// Braille dots pack 2x4 sub-pixels per cell, so the image keeps
-				// fine detail without a large footprint. v opens the full-screen
-				// view for a closer look.
-				if lines, ok := media.BrailleImage(a.LocalPath, min(bw, 24), 10); ok {
+				image, _ := a.Preview()
+				// A terminal that speaks the graphics protocol draws the real
+				// image; the rest get braille dots, which pack 2x4 sub-pixels
+				// per cell and so keep fine detail in the same footprint. Either
+				// way v opens the full-screen view for a closer look.
+				if opts.Graphics {
+					if transmit, lines, ok := placeImage(image, bw, opts); ok {
+						m.transmissions = append(m.transmissions, transmit)
+						wrapped = append(wrapped, lines...)
+						continue
+					}
+				}
+				if lines, ok := media.BrailleImage(image, min(bw, inlineImageCols), inlineImageRows); ok {
 					wrapped = append(wrapped, lines...)
 					continue
 				}

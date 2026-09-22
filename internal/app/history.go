@@ -242,7 +242,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -631,14 +631,17 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		}
 	case "v":
 		if msg := h.view.Current(); msg != nil && msg.HasMedia() {
-			// A downloaded image opens at full quality; otherwise the viewer
-			// explains how to fetch it.
+			// v means "show me the image", so a part already on disk opens at
+			// once and one that is still only a thumbnail is fetched first. The
+			// viewer is opened on the message either way, so the download has
+			// somewhere to report to and the other parts stay reachable.
 			for _, a := range msg.Attachments {
 				if p := localFile(a); p != "" {
 					return externalPreview(p)
 				}
 			}
 			m.openMediaViewer(*msg)
+			return m.previewAttachment()
 		}
 	case "r":
 		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {

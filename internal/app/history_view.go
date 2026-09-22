@@ -113,5 +113,9 @@ func (m *Model) historyView() string {
 		modal := m.renderModal(r)
 		layout.Modal = &modal
 	}
-	return r.Render(layout)
+	// The graphics escapes lead the frame rather than travelling inside it. They
+	// occupy no columns and move no cursor, so they are invisible to the layout,
+	// but they have to reach the terminal intact: inside a pane they would meet
+	// the padding and truncation that every other line is subject to.
+	return h.view.Transmissions() + r.Render(layout)
 }

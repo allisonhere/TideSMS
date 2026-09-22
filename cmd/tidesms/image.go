@@ -26,6 +26,15 @@ func runImageViewer(path string) error {
 
 	out := ""
 	if p := media.Detect(os.Getenv); p == media.Kitty || p == media.ITerm {
+		// Ask for the image's own shape at no more than its own resolution.
+		// Given the whole screen the terminal stretches the image to fill it,
+		// which shows a small attachment blown up and soft rather than as it is.
+		if w, h, ok := media.ImageBounds(path); ok {
+			cw, ch, _ := media.CellPixels(uintptr(fd))
+			if bc, br := media.ViewerBox(w, h, imgCols, imgRows, cw, ch); bc > 0 && br > 0 {
+				imgCols, imgRows = bc, br
+			}
+		}
 		if seq, ok := media.Render(p, path, imgCols, imgRows); ok {
 			out = seq
 		}
