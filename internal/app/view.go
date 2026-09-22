@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/sms"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tidesms/ui/components"
 	"github.com/allisonhere/tideui"
@@ -31,6 +32,19 @@ func (m *Model) dimensions() (left, right, body, editor int) {
 	editor = max(1, body-9)
 	return
 }
+
+// composerEstimate reports the draft's length and SMS segment count, or "" for
+// an empty draft. It is shown next to the composer so a long message is obvious
+// before sending.
+func (m *Model) composerEstimate() string {
+	text := m.editor.Value()
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	e := sms.Count(text)
+	return fmt.Sprintf("%d chars · %d SMS", len([]rune(text)), e.Segments)
+}
+
 func (m *Model) sizeEditor() {
 	_, right, _, height := m.dimensions()
 	m.editor.Size(max(1, right-2), height)
@@ -71,7 +85,11 @@ func (m *Model) View() string {
 		ed = append(ed, "")
 	}
 	lines = append(lines, ed[:eh]...)
-	lines = append(lines, separator, r.Styles.DetailMeta.Render("Alt+Enter / F12 send · Alt+Esc contacts"))
+	footer := "Alt+Enter / F12 send · Alt+Esc contacts"
+	if est := m.composerEstimate(); est != "" {
+		footer += " · " + est
+	}
+	lines = append(lines, separator, r.Styles.DetailMeta.Render(footer))
 	notification := m.notice
 	if notification == "" {
 		notification = "Local drafts · Ctrl+P commands · ? help"
@@ -139,6 +157,14 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			title = "Incoming bubble theme"
 		}
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "contact":
+		title = "Contact"
+		body = m.contactDetailsHeader() + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-18))
+		hint = "Enter run · Esc close"
+	case "delete-message":
+		title = "Delete local copy"
+		body = "Delete this cached copy?\nThe phone's own message is not touched, and a synced copy may\nreappear after the next sync.\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16))
+		hint = "Enter confirm · Esc cancel"
 	case "search-all":
 		title = "Search messages"
 		body = m.searchInput.View() + "\n\n" + components.Choices(r, m.globalSearchLabels(), m.choice, w-4, max(1, m.height-16))

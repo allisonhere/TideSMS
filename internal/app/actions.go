@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages", "Search all messages"}
+var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages", "Search all messages", "Mute thread", "Unmute thread", "Toggle notification body preview", "Contact details"}
 
 // historyCommands are the palette entries that only make sense with the
 // conversation view, so a plain compose session does not offer them.
@@ -22,6 +22,8 @@ var historyCommands = map[string]bool{
 	"Sync phone contacts": true, "Toggle message bubbles": true, "Toggle bubble corners": true,
 	"Toggle bubble fill": true, "Change thread incoming bubble theme": true, "Change thread outgoing bubble theme": true,
 	"Change thread AI policy": true,
+	"Mute thread":             true,
+	"Unmute thread":           true,
 }
 
 func (m *Model) navigation(k tea.KeyMsg) tea.Cmd {
@@ -202,7 +204,7 @@ func (m *Model) action(name string) tea.Cmd {
 	case "Sync phone contacts":
 		m.modal = ""
 		return m.syncContacts(true)
-	case "Edit contact", "Delete contact", "Change contact theme", "Change incoming bubble theme", "Change outgoing bubble theme", "Change AI policy":
+	case "Edit contact", "Delete contact", "Change contact theme", "Change incoming bubble theme", "Change outgoing bubble theme", "Change AI policy", "Contact details":
 		c, ok := m.selectedContact()
 		if m.focus && (m.recipient.ID != "" || m.recipient.Synced) {
 			c = m.recipient
@@ -234,6 +236,8 @@ func (m *Model) action(name string) tea.Cmd {
 			m.openBubblePicker("contact", true)
 		case "Change AI policy":
 			m.openAIPolicyPicker(storage.ScopeContact)
+		case "Contact details":
+			m.openContactDetails()
 		}
 	case "Switch device":
 		m.openDevices()
@@ -245,6 +249,10 @@ func (m *Model) action(name string) tea.Cmd {
 			c.Composer.Mode = "vim"
 		}
 		m.modal = ""
+		return m.saveConfig(c)
+	case "Toggle notification body preview":
+		c := m.cfg
+		c.Notifications.ShowBody = !c.Notifications.ShowBody
 		return m.saveConfig(c)
 	case "Open settings":
 		m.openSettings()
@@ -295,6 +303,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "search-all":
 		return m.globalSearchKey(k)
+	case "contact":
+		return m.contactDetailsKey(k)
 	}
 	if k.String() == "esc" {
 		m.modal = ""
@@ -394,6 +404,20 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 				return m.copyText(msg.Body)
 			case "Reply":
 				m.setPane(paneComposer)
+			case "Quote":
+				m.setPane(paneComposer)
+				m.quoteMessage(msg.Body)
+				return nil
+			case "Search text":
+				m.openGlobalSearch()
+				m.searchInput.SetValue(msg.Body)
+				return m.runGlobalSearch()
+			case "Delete local copy":
+				m.deleteMsgID = msg.ID
+				m.modal = "delete-message"
+				m.choice = 0
+				m.choices = []string{"Delete", "Cancel"}
+				return nil
 			case "Retry":
 				m.history.retryID = msg.ID
 				m.editor.SetValue(msg.Body)
@@ -401,6 +425,12 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 				return m.send()
 			}
 			return nil
+		case "delete-message":
+			if m.choice != 0 || m.deleteMsgID == "" {
+				m.modal = ""
+				return nil
+			}
+			return m.deleteLocalCopy(m.deleteMsgID)
 		case "compose":
 			if m.choice < len(m.picks) {
 				return m.pickRecipient(m.picks[m.choice])

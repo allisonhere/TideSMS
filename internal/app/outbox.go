@@ -308,6 +308,26 @@ func (m *Model) scheduleTimeKey(k tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
+// deleteLocalCopy removes one cached message and, if it was still pending, its
+// queue or schedule row. The phone's own copy is never touched.
+func (m *Model) deleteLocalCopy(id string) tea.Cmd {
+	m.modal = ""
+	m.deleteMsgID = ""
+	repo := m.store
+	os, hasOutbox := m.outbox()
+	return func() tea.Msg {
+		var err error
+		if repo != nil {
+			err = repo.DeleteMessage(id)
+		}
+		if hasOutbox {
+			_ = os.RemoveQueue(id)
+			_ = os.RemoveScheduled(id)
+		}
+		return historySavedMsg{err: err}
+	}
+}
+
 // outboxAction handles the palette's queue and schedule entries.
 func (m *Model) outboxAction(name string) (tea.Cmd, bool) {
 	switch name {

@@ -262,6 +262,14 @@ func (s *Store) DeleteLocalMessage(id string) error {
 	return err
 }
 
+// DeleteMessage removes one cached copy of a message. The phone's own copy is
+// untouched, and a synced message may reappear on the next sync; that is the
+// point of calling it a local copy.
+func (s *Store) DeleteMessage(id string) error {
+	_, err := s.db.Exec("DELETE FROM messages WHERE id=?", id)
+	return err
+}
+
 func (s *Store) LastSync(thread string) (string, time.Time, error) {
 	var id string
 	var ms int64

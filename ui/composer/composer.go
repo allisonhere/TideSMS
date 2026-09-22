@@ -68,6 +68,10 @@ func (m *Model) ApplyAll(text string) {
 // Undo steps back one edit, so an accepted AI change is recoverable.
 func (m *Model) Undo() bool { return m.editor.Undo() }
 
+// InsertString inserts text at the caret as one undo unit, used for quoted
+// replies and other programmatic composition.
+func (m *Model) InsertString(s string) { m.editor.InsertString(s) }
+
 // SetMarkers replaces the inline highlight ranges.
 func (m *Model) SetMarkers(ms []Marker) { m.markers = ms }
 

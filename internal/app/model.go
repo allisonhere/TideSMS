@@ -33,6 +33,11 @@ type Repository interface {
 	AIPolicy(scope, id string) (policy, provider, model string, ok bool, err error)
 	SetAIPolicy(scope, id, policy, provider, model string) error
 	ClearAIPolicy(scope, id string) error
+	// NotificationMode returns a stored per-contact or per-thread override.
+	NotificationMode(scope, id string) (mode string, ok bool, err error)
+	SetNotificationMode(scope, id, mode string) error
+	ClearNotificationMode(scope, id string) error
+	DeleteMessage(string) error
 }
 type Model struct {
 	history                                         historyState
@@ -91,6 +96,8 @@ type Model struct {
 	searchInput   textinput.Model
 	globalResults []search.Result
 	searchRev     uint64
+	// deleteMsgID is the message awaiting Delete-local-copy confirmation.
+	deleteMsgID string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry

@@ -64,6 +64,8 @@ func (m *Model) historyView() string {
 	}
 	if h.older {
 		hint = "Loading older messages…"
+	} else if est := m.composerEstimate(); est != "" {
+		hint += " · " + est
 	}
 	lines = append(lines, separator, cr.Styles.DetailMeta.Render(hint), components.Notification(cr, m.notice, m.failed))
 	// Paint the conversation on its own background, reopening it after the inner

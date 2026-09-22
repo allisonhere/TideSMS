@@ -424,6 +424,117 @@ func TestIncomingMessagesUpdateThreadsAndNotifySelectively(t *testing.T) {
 	if body := n.seen()[1][1]; body != "New SMS" || strings.Contains(body, "porch") {
 		t.Fatalf("body preview leaked: %q", body)
 	}
+
+	// A muted thread stays quiet even for a background message.
+	if err := m.store.SetNotificationMode(storage.ScopeThread, unknownThread, notifMuted); err != nil {
+		t.Fatal(err)
+	}
+	fourth := incoming(unknownThread, unknown, "Another parcel", 62)
+	fourth.Timestamp = time.Now()
+	b.Emit(domain.Event{Kind: domain.EventMessage, Message: &fourth})
+	d.settle("muted message", func() bool { return thread(t, m, unknownThread).LastMessage == fourth.Body })
+	if len(n.seen()) != 2 {
+		t.Fatalf("muted thread notified: %v", n.seen())
+	}
+}
+
+// Quote inserts the message as text composition, and delete removes only the
+// local cached copy.
+func TestQuoteAndDeleteLocalCopy(t *testing.T) {
+	m, _, st, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	d.settle("history", func() bool { return len(m.history.view.Messages) == 3 })
+
+	find := func(body string) int {
+		for i, msg := range m.history.view.Messages {
+			if msg.Body == body {
+				return i
+			}
+		}
+		t.Fatalf("message %q not loaded", body)
+		return -1
+	}
+	const target = "Bring dessert 😄"
+	m.history.view.Selected = find(target)
+
+	d.press("enter")
+	pickChoice(t, m, "Quote")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if got := m.editor.Value(); !strings.Contains(got, "> "+target) {
+		t.Fatalf("quote not inserted: %q", got)
+	}
+
+	// Quoting leaves the composer focused; go back to the conversation.
+	m.setPane(paneConversation)
+	m.history.view.Selected = find(target)
+	d.press("enter")
+	pickChoice(t, m, "Delete local copy")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.modal != "delete-message" {
+		t.Fatalf("confirm modal = %q", m.modal)
+	}
+	pickChoice(t, m, "Delete")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+
+	for _, msg := range m.history.view.Messages {
+		if msg.Body == target {
+			t.Fatal("deleted message still in the view")
+		}
+	}
+	remaining, err := st.Messages(amyThread, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range remaining {
+		if msg.Body == target {
+			t.Fatal("deleted message still in the cache")
+		}
+	}
+}
+
+// The contact inspector summarises a person and reuses the existing actions;
+// muting from it is stored per contact.
+func TestContactDetailsMuteToggle(t *testing.T) {
+	m, _, st, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	if _, ok := m.contactForDetails(); !ok {
+		t.Fatal("no contact to inspect")
+	}
+	m.editing = m.contacts[0]
+	m.openContactDetails()
+	if m.modal != "contact" {
+		t.Fatalf("modal = %q", m.modal)
+	}
+	pickChoice(t, m, "Mute notifications")
+	if cmd := m.contactDetailsKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		cmd()
+	}
+	mode, ok, _ := st.NotificationMode(storage.ScopeContact, m.contacts[0].PhoneNumber)
+	if !ok || mode != notifMuted {
+		t.Fatalf("mute not stored: mode=%q ok=%v", mode, ok)
+	}
+	m.openContactDetails()
+	pickChoice(t, m, "Unmute notifications")
+	if cmd := m.contactDetailsKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		cmd()
+	}
+	if _, ok, _ := st.NotificationMode(storage.ScopeContact, m.contacts[0].PhoneNumber); ok {
+		t.Fatal("unmute did not clear the override")
+	}
+}
+
+func TestComposerEstimate(t *testing.T) {
+	m, _, _ := fixture(t)
+	m.choose(m.contacts[0])
+	typeText(m, strings.Repeat("a", 161))
+	if est := m.composerEstimate(); !strings.Contains(est, "161 chars") || !strings.Contains(est, "2 SMS") {
+		t.Fatalf("estimate = %q", est)
+	}
+	m.editor.SetValue("")
+	if est := m.composerEstimate(); est != "" {
+		t.Fatalf("empty estimate = %q", est)
+	}
 }
 
 // Outgoing messages appear immediately as sending, survive failure with their text

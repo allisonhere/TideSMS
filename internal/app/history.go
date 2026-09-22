@@ -611,10 +611,11 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 	case "enter":
 		m.modal = "message"
 		m.choice = 0
-		m.choices = []string{"Copy", "Reply", "Close"}
+		m.choices = []string{"Copy", "Reply", "Quote", "Search text", "Delete local copy"}
 		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {
-			m.choices = []string{"Copy", "Reply", "Retry", "Close"}
+			m.choices = append(m.choices, "Retry")
 		}
+		m.choices = append(m.choices, "Close")
 	case "y":
 		if msg := h.view.Current(); msg != nil {
 			return m.copyText(msg.Body)
@@ -659,6 +660,20 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 	}
 	return m.markVisibleRead()
 }
+
+// quoteMessage inserts the message as quoted text at the composer caret, as a
+// normal Ripple edit so it can be undone. SMS has no reply-to metadata, so
+// quoting is plain composition.
+func (m *Model) quoteMessage(body string) {
+	quoted := "> " + strings.ReplaceAll(body, "\n", "\n> ")
+	if strings.TrimSpace(m.editor.Value()) != "" {
+		m.editor.InsertString("\n" + quoted)
+	} else {
+		m.editor.InsertString(quoted)
+	}
+	m.trackChange()
+}
+
 func (m *Model) sendHistory() tea.Cmd {
 	if !m.prepareSend() {
 		return nil
@@ -788,17 +803,9 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 				s := h.store
 				cmds = append(cmds, func() tea.Msg { return historySavedMsg{s.MarkRead(thread, []string{id})} })
 			}
-			if !visible && m.cfg.Notifications.Enabled && msg.Direction == domain.Incoming && msg.Timestamp.After(h.started) {
-				name := msg.Sender
-				for _, c := range m.contacts {
-					if c.PhoneNumber == msg.Sender {
-						name = c.Name
-					}
-				}
-				body := msg.Body
-				if !m.cfg.Notifications.ShowBody {
-					body = "New SMS"
-				}
+			mode := m.notificationMode(msg.ThreadID, msg.Sender)
+			if !visible && mode != notifMuted && m.cfg.Notifications.Enabled && msg.Direction == domain.Incoming && msg.Timestamp.After(h.started) {
+				name, body := m.notificationText(msg)
 				ctx := m.ctx
 				notify := m.notifier
 				cmds = append(cmds, func() tea.Msg {
@@ -932,6 +939,32 @@ func (m *Model) historyAction(name string) (bool, tea.Cmd) {
 		}
 		m.openAIPolicyPicker(storage.ScopeThread)
 		return true, nil
+	case "Mute thread":
+		if h.active == nil {
+			m.notify("Open a thread first", true)
+			return true, nil
+		}
+		if m.store == nil {
+			return true, nil
+		}
+		thread := h.active.ID
+		m.modal = ""
+		m.notify("Thread muted", false)
+		return true, func() tea.Msg {
+			return historySavedMsg{m.store.SetNotificationMode(storage.ScopeThread, thread, notifMuted)}
+		}
+	case "Unmute thread":
+		if h.active == nil {
+			m.notify("Open a thread first", true)
+			return true, nil
+		}
+		if m.store == nil {
+			return true, nil
+		}
+		thread := h.active.ID
+		m.modal = ""
+		m.notify("Thread notifications on", false)
+		return true, func() tea.Msg { return historySavedMsg{m.store.ClearNotificationMode(storage.ScopeThread, thread)} }
 	case "Mark thread unread":
 		if h.active == nil {
 			return true, nil
