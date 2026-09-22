@@ -139,6 +139,10 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			title = "Incoming bubble theme"
 		}
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "search-all":
+		title = "Search messages"
+		body = m.searchInput.View() + "\n\n" + components.Choices(r, m.globalSearchLabels(), m.choice, w-4, max(1, m.height-16))
+		hint = "from:/before:/after: filters · Enter open · Esc close"
 	case "ai-policy":
 		title = "AI policy · " + m.aiPolicyName()
 		body = components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-14))
@@ -224,9 +228,9 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		hint = "Enter delete · Esc cancel"
 	case "help":
 		title = "Keyboard shortcuts"
-		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nq Quit (saves drafts)\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Send\nEnter  New line   Esc  Leave composer\nCtrl+G  AI review    In Vim, Esc belongs to Ripple; Alt+Esc or a clean second Esc leaves\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
+		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nCtrl+F Search all messages\nq Quit (saves drafts)\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Send\nEnter  New line   Esc  Leave composer\nCtrl+G  AI review    In Vim, Esc belongs to Ripple; Alt+Esc or a clean second Esc leaves\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
 		if m.history.enabled {
-			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Submit   Enter  New line\nEsc  Leave composer   Ctrl+G  AI review (Vim: Alt+Esc or double Esc)\n\nq  Quit from navigation panes"
+			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact   Ctrl+F  Search all messages\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nAlt+Enter / Ctrl+Enter / F12  Submit   Enter  New line\nEsc  Leave composer   Ctrl+G  AI review (Vim: Alt+Esc or double Esc)\n\nq  Quit from navigation panes"
 		}
 		hint = "↑↓ scroll · Esc close"
 	}

@@ -101,6 +101,7 @@ A message that arrives in the thread you are looking at updates it silently. One
 | Composer | Alt+Esc | Leave composer, always, including in Vim |
 | Composer | Ctrl+G | AI review of the draft (or the selection) |
 | Composer | Ctrl+Shift+Enter | Schedule the message (also Ctrl+P → Schedule message) |
+| Any pane | Ctrl+F | Search every cached message |
 
 Ripple owns editor movement, wrapping, selection, copy/paste, multiline text, and undo/redo. Normal mode uses Shift+movement, Ctrl+arrows, Ctrl+C/X/V, and Ctrl+Z/Y. Vim mode supports Normal, Insert, Visual and Visual-line modes, motions/operators, and `u`/`Ctrl+R`. **Ctrl+C copies while the composer is focused.** App navigation never consumes ordinary Vim keys. Ripple's `:q` intent leaves the composer; `:w` does not submit. Sending stays on the explicit application commands.
 
@@ -126,6 +127,14 @@ Privacy is enforced per conversation. **Ctrl+P → Change AI policy** (contact) 
 - The status bar shows `N queued` and `N scheduled` when either is non-zero.
 
 The queued, sending, sent, failed and paused states are persisted, and a message caught mid-send when the process dies is paused rather than retried blindly. The TUI drains the queue itself while it is open; the optional `tidesms-daemon` does the same while it is closed, and both share `internal/queue`, `internal/scheduler` and `internal/messaging`.
+
+## Global search
+
+**Ctrl+F**, or **Ctrl+P → Search all messages**, searches every cached message at once. The index is SQLite FTS5 over message bodies, kept in step by triggers, so search stays fast with tens of thousands of messages and never scans the table. Results show the person, date and a snippet.
+
+Filters use the same simple syntax: `from:Amy`, `before:2026-09-01`, `after:2026-08-01`, and quoted phrases such as `"dentist appointment"`. Free text and filters combine.
+
+Pressing **Enter** on a result opens that thread, widens the loaded window from the local cache until the message is present, selects it, and scrolls it into view with a brief highlight — it does not drop you at the newest message. The next navigation key clears the highlight.
 
 ## Configuration and storage
 

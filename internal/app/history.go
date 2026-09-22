@@ -6,6 +6,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/search"
 	"github.com/allisonhere/tidesms/internal/storage"
 	"github.com/allisonhere/tidesms/internal/syncer"
 	"github.com/allisonhere/tidesms/internal/themes"
@@ -36,6 +37,10 @@ const (
 	paneComposer
 )
 
+// maxJumpMessages caps how far a global-search jump will widen the loaded
+// window in the local cache.
+const maxJumpMessages = 5000
+
 type historyState struct {
 	wantsRead      bool
 	enabled        bool
@@ -63,7 +68,11 @@ type historyState struct {
 	searchResults  []domain.Message
 	searchIndex    int
 	retryID        string
-	started        time.Time
+	// jump is a global-search result being opened; it drives loading older
+	// pages until the message is in view. highlightID briefly marks it.
+	jump        *search.Result
+	highlightID string
+	started     time.Time
 }
 type syncUpdate struct {
 	status   string
@@ -233,7 +242,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -529,6 +538,9 @@ func (m *Model) copyText(text string) tea.Cmd {
 }
 func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 	h := &m.history
+	// The jumped-to highlight is deliberately brief: the next navigation key
+	// clears it.
+	h.highlightID = ""
 	if h.search {
 		switch k.String() {
 		case "esc":
@@ -720,6 +732,31 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 		}
 		if h.active != nil && v.thread == h.active.ID && h.searchQuery == "" {
 			h.view.SetMessages(v.messages)
+			if h.jump != nil && h.jump.ThreadID == v.thread {
+				idx := -1
+				for i, msg := range v.messages {
+					if msg.ID == h.jump.MessageID {
+						idx = i
+						break
+					}
+				}
+				// The target is older than the loaded window: widen it and
+				// reload rather than dumping the user at the newest message.
+				if idx < 0 && len(v.messages) >= h.limit && h.limit < maxJumpMessages {
+					h.limit = min(maxJumpMessages, h.limit*2)
+					return true, m.loadCache()
+				}
+				if idx >= 0 {
+					h.view.Follow = false
+					h.view.Selected = idx
+					h.highlightID = h.jump.MessageID
+					h.jump = nil
+					m.layoutConversation()
+					return true, m.markVisibleRead()
+				}
+				m.notify("The matched message is no longer cached", true)
+				h.jump = nil
+			}
 			m.layoutConversation()
 			if h.wantsRead {
 				h.wantsRead = false

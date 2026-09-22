@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages"}
+var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages", "Search all messages"}
 
 // historyCommands are the palette entries that only make sense with the
 // conversation view, so a plain compose session does not offer them.
@@ -183,6 +183,9 @@ func (m *Model) action(name string) tea.Cmd {
 	if cmd, ok := m.outboxAction(name); ok {
 		return cmd
 	}
+	if cmd, ok := m.searchAction(name); ok {
+		return cmd
+	}
 	if name == "Quit" {
 		m.modal = ""
 		return m.quit()
@@ -290,6 +293,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 			m.modal = "queue"
 		}
 		return nil
+	case "search-all":
+		return m.globalSearchKey(k)
 	}
 	if k.String() == "esc" {
 		m.modal = ""

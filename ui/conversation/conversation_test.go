@@ -361,3 +361,16 @@ func TestExplicitBubbleThemePaintsItsPalette(t *testing.T) {
 		t.Fatalf("explicit bubble fills not drawn: in=%v out=%v", sawIn, sawOut)
 	}
 }
+
+// A jumped-to message is marked so it stands out from the messages around it.
+func TestHighlightMarksTheJumpedMessage(t *testing.T) {
+	msgs := []domain.Message{message(domain.Incoming, "older one"), message(domain.Incoming, "newest one")}
+	lines := renderOpts(t, msgs, 60, 20, Options{Timestamps: "smart", HighlightID: msgs[0].ID})
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "▐ ") {
+		t.Fatal("no highlight marker for the jumped-to message")
+	}
+	if n := strings.Count(joined, "▐ "); n != 1 {
+		t.Fatalf("highlight marker count = %d, want 1", n)
+	}
+}

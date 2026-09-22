@@ -32,7 +32,10 @@ type Options struct {
 	// Incoming and Outgoing are the surfaces for the two directions. A zero
 	// value derives the surface from the renderer's theme.
 	Incoming, Outgoing themes.Bubble
-	Timestamps, Query  string
+	// HighlightID marks a message the user jumped to, so it stands out briefly
+	// from the messages around it. It styles only the sender line.
+	HighlightID       string
+	Timestamps, Query string
 }
 type Model struct {
 	Messages                        []domain.Message
@@ -189,7 +192,12 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			labelPad = strings.Repeat(" ", max(0, width-ansi.StringWidth(label)))
 		}
 		pad := strings.Repeat(" ", indent)
-		m.lines = append(m.lines, pad+labelPad+r.Styles.DetailMeta.Render(ansi.Truncate(label, max(0, w-indent-selectionWidth), "…")))
+		labelLine := pad + labelPad + r.Styles.DetailMeta.Render(ansi.Truncate(label, max(0, w-indent-selectionWidth), "…"))
+		if opts.HighlightID != "" && msg.ID == opts.HighlightID {
+			// A brief, unmissable cue that this is the message that was jumped to.
+			labelLine = r.Styles.SearchMatch.Render("▐ " + ansi.Truncate(label, max(0, w-indent-selectionWidth-2), "…"))
+		}
+		m.lines = append(m.lines, labelLine)
 		tl, tr, bl, br := "╭", "╮", "╰", "╯"
 		if opts.Corners == "square" {
 			tl, tr, bl, br = "┌", "┐", "└", "┘"

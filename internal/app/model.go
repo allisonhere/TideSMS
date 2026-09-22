@@ -9,6 +9,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/keys"
 	"github.com/allisonhere/tidesms/internal/notifications"
+	"github.com/allisonhere/tidesms/internal/search"
 	"github.com/allisonhere/tidesms/internal/storage"
 	"github.com/allisonhere/tidesms/ui/composer"
 	"github.com/allisonhere/tidesms/ui/conversation"
@@ -86,6 +87,10 @@ type Model struct {
 	aiEpoch   uint64
 	review    aiReviewState
 	aiInput   textinput.Model
+	// Global message search.
+	searchInput   textinput.Model
+	globalResults []search.Result
+	searchRev     uint64
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry
@@ -147,6 +152,9 @@ func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config
 	m.schedInput = textinput.New()
 	m.schedInput.CharLimit = 32
 	m.schedInput.Placeholder = "YYYY-MM-DD HH:MM"
+	m.searchInput = textinput.New()
+	m.searchInput.CharLimit = 120
+	m.searchInput.Placeholder = "Search all messages…"
 	m.assistant = buildAssistant(c)
 	if startupError != nil {
 		m.configLocked = true
@@ -521,6 +529,17 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.notify(fmt.Sprintf("Sent %d queued message(s)", v.sent), false)
 		}
 		return m, tea.Batch(m.loadCache(), m.refreshCounts())
+	case globalSearchMsg:
+		if v.revision != m.searchRev {
+			return m, nil
+		}
+		if v.err != nil {
+			m.notify("Search failed", true)
+			return m, nil
+		}
+		m.globalResults = v.results
+		m.choice = 0
+		return m, nil
 	case countsMsg:
 		m.queuedCount, m.scheduledCount = v.queued, v.scheduled
 		return m, nil
@@ -724,6 +743,10 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if v.String() == "ctrl+g" {
 			m.cancelAI()
 			return m, m.startAI("review", "")
+		}
+		if v.String() == "ctrl+f" {
+			m.openGlobalSearch()
+			return m, nil
 		}
 		// Ctrl+Enter is commonly claimed by window managers, so Alt+Enter and
 		// F12 are equal first-class send keys rather than fallbacks.
