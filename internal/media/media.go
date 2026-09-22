@@ -439,7 +439,9 @@ func kittySequence(pngData []byte, cols, rows int) string {
 		}
 		b.WriteString("\x1b_G")
 		if first {
-			b.WriteString("a=T,f=100,C=1,c=" + strconv.Itoa(cols) + ",r=" + strconv.Itoa(rows) + ",")
+			// Default cursor movement: the caption and hint print below the
+			// image rather than over it.
+			b.WriteString("a=T,f=100,c=" + strconv.Itoa(cols) + ",r=" + strconv.Itoa(rows) + ",")
 			first = false
 		}
 		b.WriteString("m=" + strconv.Itoa(more) + ";" + chunk + "\x1b\\")
