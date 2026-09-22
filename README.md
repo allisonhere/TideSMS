@@ -16,7 +16,7 @@ The binary is built in this directory; nothing is installed system-wide. `./tide
 1. The app selects the only connected device with a loaded SMS plugin, or opens a device selector. Use **Ctrl+P → Switch device** to change it. The selector shows device ID, reachability, and SMS capability.
 2. Press **n** to start a message. That opens a search over your whole address book — your own contacts and everyone imported from the phone — and typing a full number offers that number directly, so an unknown recipient needs no separate step. Press **a** to save a contact. Phone numbers accept common formatting; an international prefix is recommended. No country code is guessed.
 3. TideSMS opens on the **Threads** pane, populated from the local cache before the phone answers. **Enter** opens a thread. **c** borrows the sidebar for the contact list, where **Enter** on a contact opens their thread if one exists, and **Esc** returns to threads.
-4. Press **Enter** on a contact or thread, then compose. **Alt+Enter** submits; **Enter alone always inserts a newline**. **Ctrl+Enter**, **F12** and **Ctrl+P → Send message** are equivalent explicit send actions.
+4. Press **Enter** on a contact or thread, then compose. **Enter submits** and **Shift+Enter inserts a newline**; **Ctrl+Enter**, **F12** and **Ctrl+P → Send message** are equivalent explicit send actions. With `[composer] enter_sends = false`, Enter inserts a newline and those send instead.
 5. **Esc** leaves the composer (in Vim, **Alt+Esc** or a clean second **Esc**), returning to the conversation — or to the thread list when the recipient has no thread yet. Switching threads retains each thread's draft. Use **t** to change a contact's accent, or **Ctrl+P → Change thread theme** for this thread only.
 
 ## Conversations
@@ -95,7 +95,8 @@ A message that arrives in the thread you are looking at updates it silently. One
 | Any pane | Tab / Shift+Tab | Cycle threads / conversation / composer |
 | Contacts | Esc / c | Return to the thread list |
 | Any pane | Ctrl+P | Searchable command palette |
-| Composer | Alt+Enter | Submit SMS |
+| Composer | Enter | Submit SMS (see `enter_sends`) |
+| Composer | Shift+Enter / Alt+Enter | Insert a newline |
 | Composer | Ctrl+Enter / F12 | Submit SMS (equivalent) |
 | Composer | Esc | Leave composer (Vim: Ripple owns Esc) |
 | Composer | Alt+Esc | Leave composer, always, including in Vim |
@@ -105,7 +106,7 @@ A message that arrives in the thread you are looking at updates it silently. One
 
 Ripple owns editor movement, wrapping, selection, copy/paste, multiline text, and undo/redo. Normal mode uses Shift+movement, Ctrl+arrows, Ctrl+C/X/V, and Ctrl+Z/Y. Vim mode supports Normal, Insert, Visual and Visual-line modes, motions/operators, and `u`/`Ctrl+R`. **Ctrl+C copies while the composer is focused.** App navigation never consumes ordinary Vim keys. Ripple's `:q` intent leaves the composer; `:w` does not submit. Sending stays on the explicit application commands.
 
-**Alt+Enter**, **Ctrl+Enter** and **F12** all submit, and **Enter alone always inserts a newline**. Alt+Enter is the recommended default because window managers frequently bind Ctrl+Enter themselves; Hyprland, for instance, commonly claims it for spawning a terminal. Modified Enter requires a terminal that distinguishes it: TideSMS requests Kitty keyboard disambiguation and xterm modifyOtherKeys and handles their modified-key reports, and Alt+Enter also works through the plain ESC-prefixed form. Some terminals/multiplexers still collapse modified Enter; use F12 or the palette there. Protocol settings are restored on exit. At very small sizes the app asks for a terminal of at least 54×16; drafts are retained.
+By default **Enter submits** and **Shift+Enter inserts a newline**, as a phone messaging app does; **Ctrl+Enter** and **F12** also submit, and **Alt+Enter** inserts a newline for terminals that cannot report the shift. Set `[composer] enter_sends = false` to go back to Enter-as-newline, where **Ctrl+Enter**, **F12** and **Alt+Enter** submit. Distinguishing a modified Enter requires a terminal that reports it: TideSMS requests Kitty keyboard disambiguation and xterm modifyOtherKeys and handles their modified-key reports. Some terminals/multiplexers collapse modified Enter; with `enter_sends = false` nothing is lost, and F12 or the palette's **Send message** always work. Protocol settings are restored on exit. At very small sizes the app asks for a terminal of at least 54×16; drafts are retained.
 
 ## AI writing assistant
 
@@ -174,7 +175,8 @@ theme = "tide"
 compact_status = false
 
 [composer]
-mode = "normal" # or "vim"
+mode = "normal"     # or "vim"
+enter_sends = true  # Enter submits, Shift+Enter newlines; false restores Enter-as-newline
 
 [kdeconnect]
 preferred_device = ""

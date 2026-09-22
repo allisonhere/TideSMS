@@ -16,6 +16,9 @@ type Action string
 // ActionSchedule is Ctrl+Shift+Enter.
 const ActionSchedule Action = "schedule"
 
+// ActionNewline is Shift+Enter, which inserts a newline when Enter sends.
+const ActionNewline Action = "newline"
+
 // Normalize handles Kitty CSI-u and xterm modifyOtherKeys without reinterpreting
 // bracketed paste, which Bubble Tea delivers as an ordinary KeyMsg.
 func Normalize(msg tea.Msg) tea.Msg {
@@ -67,6 +70,9 @@ func Normalize(msg tea.Msg) tea.Msg {
 	}
 	if code == 13 && ctrl {
 		return tea.KeyMsg{Type: tea.KeyF12}
+	}
+	if code == 13 && shift {
+		return ActionNewline
 	}
 	switch code {
 	case 27:

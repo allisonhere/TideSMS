@@ -727,8 +727,13 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case keys.Action:
-		if v == keys.ActionSchedule {
+		switch v {
+		case keys.ActionSchedule:
 			return m, m.openSchedule()
+		case keys.ActionNewline:
+			if m.modal == "" && m.focus && !m.sending {
+				return m, m.insertNewline()
+			}
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -755,9 +760,10 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.openGlobalSearch()
 			return m, nil
 		}
-		// Ctrl+Enter is commonly claimed by window managers, so Alt+Enter and
-		// F12 are equal first-class send keys rather than fallbacks.
-		if v.String() == "f12" || v.String() == "ctrl+enter" || v.String() == "alt+enter" {
+		// Enter submits from the composer (below); Ctrl+Enter and F12 are the
+		// explicit keys that work from any pane and whatever the terminal
+		// reports for a bare Enter.
+		if v.String() == "f12" || v.String() == "ctrl+enter" {
 			return m, m.send()
 		}
 		// Scheduling is also on the palette; this supports terminals that can
@@ -775,6 +781,18 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focus {
 			if m.sending {
 				return m, nil
+			}
+			// Enter sends when [composer] enter_sends is on, as a phone does.
+			// Shift+Enter inserts a newline (handled above), and Alt+Enter is
+			// the fallback for terminals that cannot report the shift.
+			if m.cfg.Composer.EnterSends && v.String() == "enter" {
+				return m, m.send()
+			}
+			if v.String() == "alt+enter" {
+				if m.cfg.Composer.EnterSends {
+					return m, m.insertNewline()
+				}
+				return m, m.send()
 			}
 			// Plain editing has no use for Esc, so it leaves the composer. Vim
 			// keeps Esc for its modes, and leaves on a clean second Esc instead.
@@ -804,6 +822,12 @@ func (m *Model) logError(op string, err error) {
 	if m.log != nil {
 		m.log.Error(op, "error", err.Error())
 	}
+}
+
+// insertNewline adds a newline to the draft as one undo unit.
+func (m *Model) insertNewline() tea.Cmd {
+	m.editor.InsertString("\n")
+	return m.trackChange()
 }
 
 func (m *Model) updateEditor(msg tea.Msg) tea.Cmd {

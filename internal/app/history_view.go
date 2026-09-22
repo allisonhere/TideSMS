@@ -52,7 +52,7 @@ func (m *Model) historyView() string {
 		ed = append(ed, "")
 	}
 	lines = append(lines, ed[:eh]...)
-	hint := "Alt+Enter / F12 send · Alt+Esc history"
+	hint := "Enter / F12 send · Shift+Enter newline · Alt+Esc history"
 	if h.pane == paneConversation {
 		hint = "j/k select · r reply · / search · G newest"
 	}

@@ -45,6 +45,10 @@ type Config struct {
 	} `toml:"general"`
 	Composer struct {
 		Mode string `toml:"mode"`
+		// EnterSends makes Enter submit and Shift+Enter insert a newline, as a
+		// phone messaging app does. Turn it off for terminals that cannot tell
+		// the two apart; Enter then inserts a newline again.
+		EnterSends bool `toml:"enter_sends"`
 	} `toml:"composer"`
 	KDEConnect struct {
 		PreferredDevice string `toml:"preferred_device"`
@@ -82,6 +86,7 @@ func Default() Config {
 	var c Config
 	c.General.Theme = "tide"
 	c.Composer.Mode = "normal"
+	c.Composer.EnterSends = true
 	c.Sync.InitialMessages = 100
 	c.Sync.PageSize = 100
 	c.Notifications.Enabled = true

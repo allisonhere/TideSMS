@@ -6,6 +6,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/config"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/keys"
 	"github.com/allisonhere/tidesms/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -107,7 +108,7 @@ func TestSendCompletionDoesNotClearAnotherRecipient(t *testing.T) {
 		t.Fatal("send cleared another draft")
 	}
 }
-func TestComposerOwnsVimKeysAndEnterNeverSends(t *testing.T) {
+func TestComposerOwnsVimKeysAndShiftEnterNewlines(t *testing.T) {
 	m, f, _ := fixture(t)
 	m.cfg.Composer.Mode = "vim"
 	m.choose(m.contacts[0])
@@ -115,7 +116,7 @@ func TestComposerOwnsVimKeysAndEnterNeverSends(t *testing.T) {
 	for _, s := range []string{"j", "k", "q", "n", "e", "?"} {
 		typeText(m, s)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(keys.ActionNewline)
 	if m.editor.Value() != "jkqne?\n" || len(f.sent) != 0 || m.modal != "" {
 		t.Fatalf("editor=%q modal=%s", m.editor.Value(), m.modal)
 	}
@@ -126,6 +127,35 @@ func TestComposerOwnsVimKeysAndEnterNeverSends(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc, Alt: true})
 	if m.focus {
 		t.Fatal("Alt+Esc failed")
+	}
+}
+
+// Enter sends; Shift+Enter and Alt+Enter insert a newline. Turning enter_sends
+// off restores Enter-as-newline for terminals that cannot tell them apart.
+func TestEnterSendsAndShiftEnterNewlines(t *testing.T) {
+	m, f, _ := fixture(t)
+	m.choose(m.contacts[0])
+	typeText(m, "hello")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Enter produced no send")
+	}
+	m.Update(cmd())
+	if len(f.sent) != 1 || f.sent[0].Message != "hello" {
+		t.Fatalf("sent = %+v", f.sent)
+	}
+
+	m.cfg.Composer.EnterSends = false
+	m.choose(m.contacts[1])
+	typeText(m, "line one")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.editor.Value() != "line one\n" {
+		t.Fatalf("enter_sends off should newline: %q", m.editor.Value())
+	}
+	// Alt+Enter sends again in that mode.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if cmd == nil {
+		t.Fatal("Alt+Enter should send when enter_sends is off")
 	}
 }
 
@@ -205,7 +235,7 @@ func TestViewsBoundedAndFooterVisible(t *testing.T) {
 					t.Fatalf("%v %s width %d", size, modal, ansi.StringWidth(line))
 				}
 			}
-			if modal == "" && size[0] >= 80 && !strings.Contains(ansi.Strip(view), "Alt+Enter") {
+			if modal == "" && size[0] >= 80 && !strings.Contains(ansi.Strip(view), "Shift+Enter") {
 				t.Fatalf("send footer clipped at %v:\n%s", size, ansi.Strip(view))
 			}
 		}
@@ -227,18 +257,17 @@ func TestEmptyAndOfflineSendValidation(t *testing.T) {
 	}
 }
 
-// Window managers often claim Ctrl+Enter, so Alt+Enter sends too — and never
-// reaches the editor as a newline.
-func TestAltEnterSendsWithoutTouchingTheEditor(t *testing.T) {
+// Enter submits the draft and does not reach the editor as a newline.
+func TestEnterSendsWithoutTouchingTheEditor(t *testing.T) {
 	m, f, _ := fixture(t)
 	m.choose(m.contacts[0])
 	typeText(m, "ready")
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("Alt+Enter did not send")
+		t.Fatal("Enter did not send")
 	}
 	if m.editor.Value() != "ready" {
-		t.Fatalf("Alt+Enter edited the message: %q", m.editor.Value())
+		t.Fatalf("Enter edited the message: %q", m.editor.Value())
 	}
 	_, save := m.Update(cmd())
 	if save != nil {

@@ -22,6 +22,9 @@ func TestCtrlShiftEnterIsSchedule(t *testing.T) {
 	if got := Normalize(csi("13;6u")); got != ActionSchedule {
 		t.Fatalf("ctrl+shift+enter = %v, want schedule", got)
 	}
+	if got := Normalize(csi("13;2u")); got != ActionNewline {
+		t.Fatalf("shift+enter = %v, want newline", got)
+	}
 	// Ctrl+Enter alone is still the submit fallback.
 	got := Normalize(csi("13;5u")).(tea.KeyMsg)
 	if got.Type != tea.KeyF12 {
