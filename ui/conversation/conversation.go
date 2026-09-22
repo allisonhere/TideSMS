@@ -194,10 +194,10 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			// A local image can be drawn as text right here; anything else, or
 			// an image not yet downloaded, keeps the compact block.
 			if opts.InlineMedia {
-				// Fill the message measure, up to roughly a 200x200 pixel look
-				// on a wide pane; the height cap keeps a portrait photo from
-				// swallowing the whole conversation.
-				if lines, ok := media.TextImage(a.LocalPath, min(bw, 200), 60); ok {
+				// A glanceable inline size: big enough to recognise, small
+				// enough that a few images do not swallow the conversation.
+				// v opens the full-screen view for a closer look.
+				if lines, ok := media.TextImage(a.LocalPath, min(bw, 48), 20); ok {
 					wrapped = append(wrapped, lines...)
 					continue
 				}
