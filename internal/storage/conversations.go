@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// participantIdentity is the trailing ten-digit identity of a stored number.
+// Two spellings of the same person, such as +15124100124 and 5124100124, share
+// it, so they count once when deciding whether a thread is a group.
+const participantIdentity = `CASE WHEN length(replace(number,'+','')) >= 10 THEN substr(replace(number,'+',''),-10) ELSE number END`
+
 func upsertThread(tx *sql.Tx, t domain.Thread) error {
 	_, err := tx.Exec(`INSERT INTO threads(id,device_id,backend_id,display_name,last_message,last_timestamp,is_group) VALUES(?,?,?,?,?,?,?)
  ON CONFLICT(id) DO UPDATE SET backend_id=CASE WHEN excluded.backend_id<>'' THEN excluded.backend_id ELSE threads.backend_id END,
@@ -19,20 +24,32 @@ func upsertThread(tx *sql.Tx, t domain.Thread) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range t.Participants {
+	for _, p := range domain.DedupeParticipants(t.Participants) {
+		// One identity, one row: a later message spelling the same number
+		// differently must not add a second participant.
+		if key := contacts.MatchKey(p.Number); key != "" {
+			var n int
+			if err = tx.QueryRow(`SELECT COUNT(*) FROM thread_participants WHERE thread_id=? AND number<>? AND `+participantIdentity+`=?`, t.ID, p.Number, key).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				continue
+			}
+		}
 		if _, err = tx.Exec(`INSERT INTO thread_participants(thread_id,number,raw_number,name) VALUES(?,?,?,?) ON CONFLICT(thread_id,number) DO UPDATE SET raw_number=excluded.raw_number`, t.ID, p.Number, p.RawNumber, p.Name); err != nil {
 			return err
 		}
 	}
 
-	// The group flag is derived from the participants actually known, so a thread
-	// mislabelled from one message's duplicated addresses corrects itself.
-	if _, err = tx.Exec("UPDATE threads SET is_group=(SELECT COUNT(*) FROM thread_participants p WHERE p.thread_id=?)>1 WHERE id=?", t.ID, t.ID); err != nil {
+	// The group flag counts distinct identities, not distinct spellings, so a
+	// thread mislabelled from one message's duplicated addresses corrects itself.
+	if _, err = tx.Exec("UPDATE threads SET is_group=(SELECT COUNT(DISTINCT "+participantIdentity+") FROM thread_participants p WHERE p.thread_id=?)>1 WHERE id=?", t.ID, t.ID); err != nil {
 		return err
 	}
 
-	if t.BackendID != "" && !strings.HasPrefix(t.BackendID, "local-") && len(t.Participants) == 1 && !t.IsGroup {
-		local := domain.ThreadID(t.DeviceID, "local-"+t.Participants[0].Number)
+	participants := domain.DedupeParticipants(t.Participants)
+	if t.BackendID != "" && !strings.HasPrefix(t.BackendID, "local-") && len(participants) == 1 && !t.IsGroup {
+		local := domain.ThreadID(t.DeviceID, "local-"+participants[0].Number)
 		if _, err = tx.Exec("UPDATE messages SET thread_id=? WHERE thread_id=?", t.ID, local); err != nil {
 			return err
 		}

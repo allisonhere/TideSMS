@@ -91,6 +91,54 @@ func TestOfflineWaitFlagRoundTrips(t *testing.T) {
 	}
 }
 
+// One person's number written several ways is one participant, not a group.
+func TestFormatVariantsAreOneRecipient(t *testing.T) {
+	s := openStore(t)
+	base := time.UnixMilli(1_700_000_000_000)
+	thread := domain.ThreadID("phone", "gv")
+	parts := []domain.Participant{domain.ParticipantFor("+15124100124"), domain.ParticipantFor("5124100124"), domain.ParticipantFor("15124100124")}
+	if _, err := s.MergeMessages([]domain.Message{{
+		ID: "m1", DeviceID: "phone", ThreadID: thread, BackendID: "b1", Sender: "+15124100124",
+		Body: "hey", Timestamp: base, Direction: domain.Incoming, Status: domain.Unknown, Participants: parts,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := s.Threads("phone")
+	if err != nil || len(ts) != 1 {
+		t.Fatalf("threads = %+v err=%v", ts, err)
+	}
+	if ts[0].IsGroup {
+		t.Fatal("three spellings of one number were treated as a group")
+	}
+	if len(ts[0].Participants) != 1 {
+		t.Fatalf("participants = %+v", ts[0].Participants)
+	}
+
+	// Two genuinely different people still form a group.
+	group := domain.ThreadID("phone", "fam")
+	if _, err := s.MergeMessages([]domain.Message{{
+		ID: "m2", DeviceID: "phone", ThreadID: group, BackendID: "b2", Sender: "+15124100124", IsGroup: true,
+		Body: "hi all", Timestamp: base, Direction: domain.Incoming, Status: domain.Unknown,
+		Participants: []domain.Participant{domain.ParticipantFor("+15124100124"), domain.ParticipantFor("+15559876543")},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, th := range mustThreads(t, s) {
+		if th.ID == group && !th.IsGroup {
+			t.Fatal("a real group lost its flag")
+		}
+	}
+}
+
+func mustThreads(t *testing.T, s *Store) []domain.Thread {
+	t.Helper()
+	ts, err := s.Threads("phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ts
+}
+
 func TestScheduledRoundTripAndClaim(t *testing.T) {
 	s := openStore(t)
 	now := time.UnixMilli(1_700_000_000_000)

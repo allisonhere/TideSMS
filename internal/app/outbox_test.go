@@ -81,6 +81,24 @@ func TestOfflineSendQueuesThenSendsOnReconnect(t *testing.T) {
 	}
 }
 
+// A Google Voice-style thread listing one number in several formats is still a
+// single recipient, so sending is allowed even if the stored flag is stale.
+func TestSameNumberFormatsAllowSending(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	m.history.active.IsGroup = true
+	m.history.active.Participants = []domain.Participant{domain.ParticipantFor("+15124100124"), domain.ParticipantFor("5124100124")}
+	m.setPane(paneComposer)
+	typeText(m, "hello gv")
+	if !m.prepareSend() {
+		t.Fatal("one person written two ways was treated as a group")
+	}
+	if m.pending == nil || m.pending.phone != "+15124100124" {
+		t.Fatalf("pending = %+v", m.pending)
+	}
+}
+
 func TestScheduledMessageReleasesWhenDue(t *testing.T) {
 	m, b, st, d, _ := conversationFixture(t)
 	syncPhone(t, d)

@@ -28,3 +28,6 @@ var BubbleThemes string
 
 //go:embed 009_queue_offline_wait.sql
 var QueueOfflineWait string
+
+//go:embed 010_participant_identity.sql
+var ParticipantIdentity string

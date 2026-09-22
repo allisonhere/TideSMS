@@ -102,9 +102,15 @@ func (m *Model) prepareSend() bool {
 		m.notify("Write a message before sending", true)
 		return false
 	}
-	if h.active != nil && h.active.IsGroup {
-		m.notify("Group history is readable; group SMS sending is not supported by this backend", true)
-		return false
+	// A thread is only a real group when it has more than one distinct person.
+	// The same number spelled several ways is still one recipient.
+	var recipients []domain.Participant
+	if h.active != nil {
+		recipients = domain.DedupeParticipants(h.active.Participants)
+		if len(recipients) > 1 {
+			m.notify("Group history is readable; group SMS sending is not supported by this backend", true)
+			return false
+		}
 	}
 	if m.recipient.PhoneNumber == "" {
 		m.notify("Choose a recipient first", true)
@@ -135,8 +141,10 @@ func (m *Model) prepareSend() bool {
 		h.retryID = ""
 	}
 	phone := ""
-	if len(t.Participants) == 1 {
-		phone = t.Participants[0].Number
+	if deduped := domain.DedupeParticipants(t.Participants); len(deduped) == 1 {
+		phone = deduped[0].Number
+	} else if m.recipient.PhoneNumber != "" {
+		phone = m.recipient.PhoneNumber
 	}
 	m.pending = &pendingSend{msg: msg, draftKey: key, draft: draft, phone: phone}
 	return true
