@@ -10,7 +10,6 @@ import (
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/x/ansi"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -94,7 +93,7 @@ func (m *Model) View() string {
 	lines = append(lines, separator, r.Styles.DetailMeta.Render(footer))
 	notification := m.notice
 	if notification == "" {
-		notification = "Local drafts · Ctrl+P commands · ? help"
+		notification = "Local drafts · Ctrl+P commands · Ctrl+O settings · ? help"
 	}
 	lines = append(lines, ansi.Truncate(components.Notification(r, notification, m.failed), right-2, "…"))
 	for i, line := range lines {
@@ -108,6 +107,16 @@ func (m *Model) View() string {
 	}
 	return r.Render(layout)
 }
+
+// settingsHeading draws a section title as a labelled rule. The settings panel
+// and the shortcut list share it so the two read as the same kind of document:
+// both are long lists that only become scannable once they are divided.
+func settingsHeading(r tideui.Renderer, title string, width int) string {
+	label := strings.ToUpper(title)
+	rule := max(0, width-ansi.StringWidth(label)-1)
+	return r.Styles.DetailMeta.Render(label + " " + strings.Repeat("─", rule))
+}
+
 func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	w := max(20, min(66, m.width-8))
 	title := m.modal
@@ -255,31 +264,48 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
 	case "settings":
 		title = "Settings"
-		fields := m.settingsFields()
-		idx := max(0, min(m.choice, len(fields)-1))
+		lines := m.settingsLines()
+		idx := max(0, min(m.choice, len(m.settingsFields())-1))
 		// The panel grew past what a short window can hold, so it shows a slice
 		// around the selection rather than overflowing the modal. The window is
-		// only smaller than the list when it has to be.
+		// only smaller than the list when it has to be, and it is measured in
+		// drawn lines, headings included, since those take room too.
 		visible := max(3, m.height-12)
-		first := 0
-		if len(fields) > visible {
-			first = min(max(0, idx-visible/2), len(fields)-visible)
+		cursor := 0
+		for i, line := range lines {
+			if line.heading == "" && line.index == idx {
+				cursor = i
+			}
 		}
-		last := min(len(fields), first+visible)
+		first := 0
+		if len(lines) > visible {
+			first = min(max(0, cursor-visible/2), len(lines)-visible)
+			// Never open a window on a heading's row without the rows it
+			// titles being the reason; starting one line earlier keeps the
+			// heading with its group.
+			if first > 0 && lines[first].heading == "" && lines[first-1].heading != "" {
+				first--
+			}
+		}
+		last := min(len(lines), first+visible)
 		var rows []string
 		if first > 0 {
-			rows = append(rows, r.Styles.DetailMeta.Render("↑ "+strconv.Itoa(first)+" more"))
+			rows = append(rows, r.Styles.DetailMeta.Render("↑ more"))
 		}
 		for i := first; i < last; i++ {
-			f := fields[i]
-			suffix := m.settingsValue(f.id, i == idx)
-			if m.settingEdit && i == idx {
+			line := lines[i]
+			if line.heading != "" {
+				rows = append(rows, settingsHeading(r, line.heading, w-4))
+				continue
+			}
+			suffix := m.settingsValue(line.field.id, line.index == idx)
+			if m.settingEdit && line.index == idx {
 				suffix = m.settingInput.View()
 			}
-			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: f.label, Suffix: suffix, Selected: i == idx}, w-4))
+			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: line.field.label, Suffix: suffix, Selected: line.index == idx}, w-4))
 		}
-		if last < len(fields) {
-			rows = append(rows, r.Styles.DetailMeta.Render("↓ "+strconv.Itoa(len(fields)-last)+" more"))
+		if last < len(lines) {
+			rows = append(rows, r.Styles.DetailMeta.Render("↓ more"))
 		}
 		body = strings.Join(rows, "\n")
 		// Say what is wrong with the AI configuration here, where it can be
@@ -295,10 +321,7 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		hint = "Enter delete · Esc cancel"
 	case "help":
 		title = "Keyboard shortcuts"
-		body = "CONTACTS\nj/k or ↑↓  Move      Enter  Select\n/ Search   n New message  a Add  e Edit\nt Theme    d Delete  r Refresh\n⟲ marks contacts from your phone; e or t keeps a local copy\nTab Cycle panes     Esc back to threads\nCtrl+F Search all messages\nq Quit (saves drafts)\n\nCOMPOSER\nEnter / Ctrl+Enter / F12  Send   Shift+Enter  New line\nEsc  Leave composer   Ctrl+G  AI review    In Vim, Esc belongs to Ripple; Alt+Esc or a clean second Esc leaves\nCtrl+C copies text while composing\n\nCLI submission is not a delivery receipt."
-		if m.history.enabled {
-			body = "THREADS & HISTORY\nTab  Cycle threads / history / composer\nc  Contact list (hidden until asked)   Esc  Back to threads\nj/k  Select thread or message   Enter  Open / inspect\nr  Reply (failed message: prepare retry)\ny  Copy message   v  Preview attachment   /  Search cached thread\nn/N  Next / previous match   Esc  Exit search\ng  Oldest loaded   G  Newest / mark read\nPgUp/PgDn  Scroll message lines\nCtrl+P  Thread theme, unread, refresh, contact   Ctrl+F  Search all messages\n⟲ marks contacts from your phone; e or t keeps a local copy\nThe list shows people you have threads with; n searches everyone\n\nCOMPOSER\nEnter / Ctrl+Enter / F12  Submit   Shift+Enter  New line\nEsc  Leave composer   Ctrl+G  AI review (Vim: Alt+Esc or double Esc)\n\nq  Quit from navigation panes"
-		}
+		body = strings.Join(helpSections(r, m.history.enabled, w-4), "\n")
 		hint = "↑↓ scroll · Esc close"
 	}
 	if m.failed {
@@ -319,4 +342,98 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	}
 	body = strings.Join(ls, "\n") + "\n\n" + hint
 	return components.Modal(r, title, body, w)
+}
+
+// helpGroup is one titled run of shortcut lines, shaped like the settings
+// panel's groups so the two read the same way.
+type helpGroup struct {
+	title string
+	lines []string
+}
+
+// helpSections renders the shortcut list under the same headings the settings
+// panel uses. The list was one undivided block, which is exactly the shape a
+// reader has to scan rather than look up.
+func helpSections(r tideui.Renderer, history bool, width int) []string {
+	groups := composeHelp()
+	if history {
+		groups = historyHelp()
+	}
+	var out []string
+	for i, g := range groups {
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, settingsHeading(r, g.title, width))
+		out = append(out, g.lines...)
+	}
+	return out
+}
+
+// historyHelp is the shortcut list with a conversation open.
+func historyHelp() []helpGroup {
+	return []helpGroup{
+		{"Moving around", []string{
+			"Tab            Cycle threads / history / composer",
+			"j/k or ↑↓      Select thread or message",
+			"Enter          Open thread · inspect message",
+			"g / G          Oldest loaded · newest and mark read",
+			"PgUp/PgDn      Scroll message lines",
+			"c / Esc        Contact list · back to threads",
+		}},
+		{"The conversation", []string{
+			"r              Reply (failed message: prepare retry)",
+			"y              Copy message text",
+			"v              Preview attachment, fetching it if needed",
+			"/              Search this thread   n/N  next / previous",
+			"Esc            Leave search",
+		}},
+		{"Composing", []string{
+			"Enter          Submit   Ctrl+Enter and F12 also send",
+			"Shift+Enter    New line",
+			"Esc            Leave composer (Vim: Alt+Esc or double Esc)",
+			"Ctrl+G         AI review of the draft",
+		}},
+		{"Everywhere", []string{
+			", or Ctrl+O    Settings",
+			"Ctrl+P         Commands: theme, unread, refresh, contact",
+			"Ctrl+F         Search all messages",
+			"?              This list        q  Quit from a navigation pane",
+		}},
+		{"Good to know", []string{
+			"⟲ marks contacts from your phone; e or t keeps a local copy.",
+			"The list shows people you have threads with; n searches all.",
+			"Submitting to the CLI is not a delivery receipt.",
+		}},
+	}
+}
+
+// composeHelp is the shortcut list before a conversation is open.
+func composeHelp() []helpGroup {
+	return []helpGroup{
+		{"Contacts", []string{
+			"j/k or ↑↓      Move            Enter  Select",
+			"/              Search          n      New message",
+			"a / e          Add · edit      d      Delete",
+			"t              Theme           r      Refresh from phone",
+			"Tab / Esc      Cycle panes · back to threads",
+		}},
+		{"Composing", []string{
+			"Enter          Send   Ctrl+Enter and F12 also send",
+			"Shift+Enter    New line",
+			"Esc            Leave composer (Vim: Alt+Esc or double Esc)",
+			"Ctrl+G         AI review of the draft",
+			"Ctrl+C         Copy text while composing",
+		}},
+		{"Everywhere", []string{
+			", or Ctrl+O    Settings",
+			"Ctrl+P         Commands",
+			"Ctrl+F         Search all messages",
+			"?              This list        q  Quit (saves drafts)",
+		}},
+		{"Good to know", []string{
+			"⟲ marks contacts from your phone; e or t keeps a local copy.",
+			"Submitting to the CLI is not a delivery receipt.",
+		}},
+	}
 }

@@ -55,7 +55,7 @@ func (m *Model) historyView() string {
 	lines = append(lines, ed[:eh]...)
 	hint := "Enter / F12 send · Shift+Enter newline · Alt+Esc history"
 	if h.pane == paneConversation {
-		hint = "j/k select · r reply · v preview · / search · G newest"
+		hint = "j/k select · r reply · v preview · / search · , settings"
 	}
 	if h.search || h.searchQuery != "" {
 		hint = "/ " + h.searchQuery + fmt.Sprintf(" · %d matches · n/N next", len(h.searchResults))
@@ -89,7 +89,7 @@ func (m *Model) historyView() string {
 		// Contacts share the sidebar with threads rather than holding a column of
 		// their own: threads already carry resolved names, so the list is only
 		// wanted when it is being used, and the conversation gets the width.
-		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
+		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts · , settings", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
 		if h.pane == paneContacts {
 			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: true}
 		}

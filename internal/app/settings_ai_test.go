@@ -21,7 +21,7 @@ func TestSettingsOffersAIConfiguration(t *testing.T) {
 	if m.modal != "settings" {
 		t.Fatalf("modal %q", m.modal)
 	}
-	for _, label := range []string{"AI enabled", "AI provider", "AI endpoint", "AI model", "AI API key", "AI default policy"} {
+	for _, label := range []string{"Enabled", "Provider", "Endpoint", "Model", "API key", "Default policy"} {
 		selectSetting(t, m, label)
 	}
 }
@@ -58,7 +58,7 @@ func TestEnablingAIChoosesAModelFromTheProvider(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI enabled")
+	selectSetting(t, m, "Enabled")
 
 	// Enabling with no model goes and asks rather than writing a config the
 	// loader would refuse on the next start.
@@ -81,7 +81,7 @@ func TestEnablingAIChoosesAModelFromTheProvider(t *testing.T) {
 		t.Errorf("the picker did not return to the panel: %q", m.modal)
 	}
 
-	selectSetting(t, m, "AI enabled")
+	selectSetting(t, m, "Enabled")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("enabled", func() bool { return !m.busy && m.cfg.AI.Enabled })
 
@@ -99,7 +99,7 @@ func TestEnablingAIChoosesALocalProvider(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI enabled")
+	selectSetting(t, m, "Enabled")
 
 	cmd := m.modalKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -130,7 +130,7 @@ func TestUnreachableProviderFallsBackToTyping(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "Model")
 
 	d.run(m.applyAIModels(aiModelsMsg{err: ai.ErrUnavailable}))
 	if m.modal != "settings" {
@@ -158,7 +158,7 @@ func TestCloudProviderAsksForTheKeyBeforeListing(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderOpenAI) })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "Model")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 
 	if m.modal == "ai-models" {
@@ -185,7 +185,7 @@ func TestLocalOnlyPolicyBlocksListingACloudProvider(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.APIKey == "sk-test" })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "Model")
 	if cmd := m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
 		t.Fatal("a forbidden provider was contacted for its models")
 	}
@@ -210,7 +210,7 @@ func TestClearingTheModelDisablesAI(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Enabled })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "Model")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	for range "llama3.2" {
 		m.modalKey(tea.KeyMsg{Type: tea.KeyBackspace})
@@ -238,7 +238,7 @@ func TestChangingProviderClearsTheEndpoint(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI provider")
+	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex(string(ai.ProviderLMStudio))
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("switched", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderLMStudio) })
@@ -260,7 +260,7 @@ func TestDisabledProviderTurnsAIOff(t *testing.T) {
 	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Enabled })
 
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI provider")
+	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex(string(ai.ProviderDisabled))
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("off", func() bool { return !m.busy && !m.cfg.AI.Enabled })
@@ -272,7 +272,7 @@ func TestAPIKeyIsEditedMaskedAndNeverShown(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI API key")
+	selectSetting(t, m, "API key")
 
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	if !m.settingEdit {
@@ -311,7 +311,7 @@ func TestEscapeCancelsTheEditNotThePanel(t *testing.T) {
 	// The endpoint row is typed directly; the model row goes through the
 	// picker, which is a different path.
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI endpoint")
+	selectSetting(t, m, "Endpoint")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	for _, r := range "http://example" {
 		m.modalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
@@ -334,7 +334,7 @@ func TestTypedRowKeepsNavigationKeysAsText(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI endpoint")
+	selectSetting(t, m, "Endpoint")
 	before := m.choice
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	for _, r := range "jk" {

@@ -812,6 +812,14 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.openGlobalSearch()
 			return m, nil
 		}
+		// Settings are reached from every pane, the composer included, which is
+		// why this is a chord: a bare key there is text. Ctrl+O is free of the
+		// terminal's own meanings, unlike Ctrl+S, which many still read as flow
+		// control.
+		if v.String() == "ctrl+o" {
+			m.openSettings()
+			return m, nil
+		}
 		// Enter submits from the composer (below); Ctrl+Enter and F12 are the
 		// explicit keys that work from any pane and whatever the terminal
 		// reports for a bare Enter.

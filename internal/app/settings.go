@@ -42,12 +42,12 @@ const (
 // command palette narrow what an assistant may do, and cannot bring one into
 // existence.
 var aiSettings = []settingsField{
-	{settingAIEnabled, "AI enabled"},
-	{settingAIProvider, "AI provider"},
-	{settingAIEndpoint, "AI endpoint"},
-	{settingAIModel, "AI model"},
-	{settingAIKey, "AI API key"},
-	{settingAIPolicy, "AI default policy"},
+	{settingAIEnabled, "Enabled"},
+	{settingAIProvider, "Provider"},
+	{settingAIEndpoint, "Endpoint"},
+	{settingAIModel, "Model"},
+	{settingAIKey, "API key"},
+	{settingAIPolicy, "Default policy"},
 }
 
 // textSetting reports whether a row is edited by typing rather than cycling.
@@ -64,24 +64,76 @@ type settingsField struct {
 	label string
 }
 
-// settingsFields is the row list for the current context. Contact theme only
-// appears when a contact or open thread gives it a target.
-func (m *Model) settingsFields() []settingsField {
-	fields := []settingsField{{settingTheme, "Theme"}}
+// settingsGroup is one titled run of rows. The panel is long enough that an
+// undivided list makes the reader scan it; grouping says what each row is about
+// before its label has to.
+type settingsGroup struct {
+	title  string
+	fields []settingsField
+}
+
+// settingsGroups is the panel's shape for the current context. Contact theme
+// only appears when a contact or open thread gives it a target.
+func (m *Model) settingsGroups() []settingsGroup {
+	appearance := []settingsField{{settingTheme, "Theme"}}
 	if _, ok := m.settingsContact(); ok {
-		fields = append(fields, settingsField{settingContactTheme, "Contact theme"})
+		appearance = append(appearance, settingsField{settingContactTheme, "Contact theme"})
 	}
-	fields = append(fields,
-		settingsField{settingComposer, "Composer"},
+	appearance = append(appearance,
 		settingsField{settingBubbles, "Message bubbles"},
 		settingsField{settingCorners, "Bubble corners"},
 		settingsField{settingFill, "Bubble fill"},
 		settingsField{settingBubbleIn, "Incoming bubbles"},
 		settingsField{settingBubbleOut, "Outgoing bubbles"},
-		settingsField{settingInlineMedia, "Inline images"},
 	)
-	fields = append(fields, aiSettings...)
-	return append(fields, settingsField{settingScheduler, "Background sending"})
+	return []settingsGroup{
+		{"Appearance", appearance},
+		{"Conversation", []settingsField{
+			{settingComposer, "Composer"},
+			{settingInlineMedia, "Inline images"},
+		}},
+		{"Assistant", aiSettings},
+		{"Sending", []settingsField{
+			{settingScheduler, "Background sending"},
+		}},
+	}
+}
+
+// settingsFields flattens the groups. Selection, navigation and every lookup
+// address rows by their position in this list, so a heading can never be landed
+// on: it is drawn, not selected.
+func (m *Model) settingsFields() []settingsField {
+	var out []settingsField
+	for _, g := range m.settingsGroups() {
+		out = append(out, g.fields...)
+	}
+	return out
+}
+
+// settingsLine is one drawn line of the panel: a heading, or a row together
+// with its index among the fields.
+type settingsLine struct {
+	heading string
+	field   settingsField
+	index   int
+}
+
+// settingsLines is what the panel draws, headings included, so the renderer
+// does not have to rebuild the grouping to lay it out.
+func (m *Model) settingsLines() []settingsLine {
+	var out []settingsLine
+	index := 0
+	for _, g := range m.settingsGroups() {
+		if len(g.fields) == 0 {
+			continue
+		}
+		out = append(out, settingsLine{heading: g.title})
+		for _, f := range g.fields {
+			out = append(out, settingsLine{field: f, index: index})
+			index++
+		}
+	}
+	return out
 }
 
 // settingsContact resolves the contact whose theme the panel edits, mirroring

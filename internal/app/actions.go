@@ -75,6 +75,8 @@ func (m *Model) navigation(k tea.KeyMsg) tea.Cmd {
 		if m.history.enabled {
 			m.setPane(paneThreads)
 		}
+	case ",":
+		m.openSettings()
 	case "?":
 		m.modal = "help"
 		m.choice = 0

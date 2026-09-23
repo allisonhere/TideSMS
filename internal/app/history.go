@@ -659,6 +659,8 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			return m.openCompose()
 		case "?":
 			m.modal = "help"
+		case ",":
+			m.openSettings()
 		case "q", "ctrl+c":
 			return m.quit()
 		case "c":
@@ -747,6 +749,8 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		return m.quit()
 	case "?":
 		m.modal = "help"
+	case ",":
+		m.openSettings()
 	}
 	if h.view.Selected < 3 && h.searchQuery == "" && (k.String() == "k" || k.String() == "up" || k.String() == "pgup" || k.String() == "g") {
 		return tea.Batch(m.loadCache(), m.requestOlder(true))
