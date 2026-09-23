@@ -362,17 +362,26 @@ func (m *Model) settingsActivate() tea.Cmd {
 		}
 		// Turning AI on with nothing behind it would leave every AI command
 		// failing. Pick the local provider, which needs no key and no network.
+		pickedProvider := false
 		if ai.Provider(c.AI.Provider) == ai.ProviderDisabled {
 			c.AI.Provider = string(ai.ProviderOllama)
 			m.aiProviderCursor = providerIndex(c.AI.Provider)
+			pickedProvider = true
 		}
 		// An enabled provider with no model is a configuration the loader
 		// rejects, so saving one here would lock the app out of its own config
-		// on the next start. Ask for the model instead of writing that.
+		// on the next start. Go and find the model instead of writing that.
 		if c.AI.Model == "" {
-			m.notify("Name the model first — an enabled provider needs one", true)
+			m.notify("Choose a model first — an enabled provider needs one", true)
 			m.selectSettingRow(settingAIModel)
-			return m.beginSettingEdit(settingAIModel)
+			if !pickedProvider {
+				return m.chooseAIModel()
+			}
+			// The provider was only just chosen and is not in m.cfg yet, so the
+			// lookup has to wait for the save: it reads the configuration to
+			// know who to ask.
+			m.pendingModelLookup = true
+			return m.saveConfig(c)
 		}
 		c.AI.Enabled = true
 		return m.saveConfig(c)
@@ -391,7 +400,12 @@ func (m *Model) settingsActivate() tea.Cmd {
 		c := m.cfg
 		c.AI.DefaultPolicy = globalPolicyChoices[m.aiPolicyCursor]
 		return m.saveConfig(c)
-	case settingAIEndpoint, settingAIModel, settingAIKey:
+	case settingAIModel:
+		// Offer what the provider actually serves; typing stays available
+		// behind the picker's own entry, and as the fallback when the provider
+		// cannot be reached.
+		return m.chooseAIModel()
+	case settingAIEndpoint, settingAIKey:
 		return m.beginSettingEdit(f.id)
 	}
 	return nil

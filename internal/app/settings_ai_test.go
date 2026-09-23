@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -24,50 +26,174 @@ func TestSettingsOffersAIConfiguration(t *testing.T) {
 	}
 }
 
-// Turning AI on with nothing behind it would leave every AI command failing,
-// so enabling picks the local provider, which needs no key and no network.
+// modelServer stands in for a provider's model listing, so the flow is driven
+// without reaching the network or depending on a local Ollama.
+func modelServer(t *testing.T, models ...string) string {
+	t.Helper()
+	body := `{"data":[`
+	for i, name := range models {
+		if i > 0 {
+			body += ","
+		}
+		body += `{"id":"` + name + `"}`
+	}
+	body += `]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/v1"
+}
+
+// The model is chosen from what the provider actually serves. Typing a name
+// from memory fails later, at the first request, with an error that never says
+// the name was the problem.
+func TestEnablingAIChoosesAModelFromTheProvider(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Endpoint = modelServer(t, "qwen2.5", "llama3.2")
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "AI enabled")
+
+	// Enabling with no model goes and asks rather than writing a config the
+	// loader would refuse on the next start.
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.cfg.AI.Enabled {
+		t.Fatal("AI was enabled with no model, which config.Load refuses")
+	}
+	if m.modal != "ai-models" {
+		t.Fatalf("the model picker did not open: modal=%q", m.modal)
+	}
+	// Sorted, with the escape hatch last.
+	if len(m.choices) != 3 || m.choices[0] != "llama3.2" || m.choices[2] != typeModelChoice {
+		t.Fatalf("choices = %v", m.choices)
+	}
+
+	pickChoice(t, m, "qwen2.5")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("model", func() bool { return !m.busy && m.cfg.AI.Model == "qwen2.5" })
+	if m.modal != "settings" {
+		t.Errorf("the picker did not return to the panel: %q", m.modal)
+	}
+
+	selectSetting(t, m, "AI enabled")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("enabled", func() bool { return !m.busy && m.cfg.AI.Enabled })
+
+	// The written config must load again: a panel that writes a file the app
+	// then refuses would lock the reader out of their own settings.
+	saved, err := config.Load(m.configPath)
+	if err != nil || !saved.AI.Enabled || saved.AI.Model != "qwen2.5" {
+		t.Fatalf("not persisted or not loadable: %+v %v", saved.AI, err)
+	}
+}
+
+// Enabling with no provider at all picks the local one, which needs no key and
+// no network, and then goes looking for its models.
 func TestEnablingAIChoosesALocalProvider(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
 	selectSetting(t, m, "AI enabled")
 
-	// With no model there is nothing to enable: the loader rejects an enabled
-	// provider that names no model, so the panel asks for one instead of
-	// writing a config the app could not read back.
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	cmd := m.modalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enabling with nothing configured did nothing")
+	}
 	if m.cfg.AI.Enabled {
-		t.Fatal("AI was enabled with no model, which config.Load refuses")
+		t.Fatal("AI was enabled with no model")
+	}
+	// The provider is saved before the lookup, which reads the configuration to
+	// know who to ask.
+	d.run(cmd)
+	d.settle("provider", func() bool { return !m.busy })
+	if got := ai.Provider(m.cfg.AI.Provider); got != ai.ProviderOllama {
+		t.Fatalf("provider = %q, want a local one", got)
+	}
+	policy := ai.Policy(m.cfg.AI.DefaultPolicy)
+	if policy == "" {
+		policy = ai.PolicyLocal
+	}
+	if !ai.Allowed(policy, ai.Provider(m.cfg.AI.Provider)) {
+		t.Fatalf("enabling produced a setup its own policy forbids: %s / %s", policy, m.cfg.AI.Provider)
+	}
+}
+
+// A provider that cannot be reached leaves the model typeable rather than
+// stranding the reader with no way to name one.
+func TestUnreachableProviderFallsBackToTyping(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "AI model")
+
+	d.run(m.applyAIModels(aiModelsMsg{err: ai.ErrUnavailable}))
+	if m.modal != "settings" {
+		t.Fatalf("modal = %q, want the panel", m.modal)
 	}
 	if !m.settingEdit || m.settingEditing != settingAIModel {
-		t.Fatal("enabling with no model did not ask for one")
+		t.Fatal("an unreachable provider did not fall back to typing the model")
 	}
 	for _, r := range "llama3.2" {
 		m.modalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	d.settle("model", func() bool { return !m.busy && m.cfg.AI.Model == "llama3.2" })
+}
 
-	selectSetting(t, m, "AI enabled")
+// A cloud provider cannot list anything without its key, so the panel asks for
+// the key first instead of producing an authentication failure to interpret.
+func TestCloudProviderAsksForTheKeyBeforeListing(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOpenAI)
+	c.AI.DefaultPolicy = "cloud"
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderOpenAI) })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "AI model")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	d.settle("saved", func() bool { return !m.busy && m.cfg.AI.Enabled })
 
-	if got := ai.Provider(m.cfg.AI.Provider); got != ai.ProviderOllama {
-		t.Fatalf("provider = %q, want a local one", got)
+	if m.modal == "ai-models" {
+		t.Fatal("a keyless cloud provider was asked for its models")
 	}
-	// The default policy is local, so the chosen provider has to satisfy it.
-	policy := ai.Policy(m.cfg.AI.DefaultPolicy)
-	if policy == "" {
-		policy = ai.PolicyLocal
+	if !m.settingEdit || m.settingEditing != settingAIKey {
+		t.Fatalf("the reader was not sent to the key row: edit=%v row=%v", m.settingEdit, m.settingEditing)
 	}
-	if !ai.Allowed(policy, ai.Provider(m.cfg.AI.Provider)) {
-		t.Fatalf("enabling AI produced a setup its own policy forbids: %s / %s", policy, m.cfg.AI.Provider)
+	if !strings.Contains(m.notice, "API key") {
+		t.Errorf("notice = %q, want it to name the key", m.notice)
 	}
-	// The written config must load again: a panel that can write a file the
-	// app then refuses would lock the reader out of their own settings.
-	saved, err := config.Load(m.configPath)
-	if err != nil || !saved.AI.Enabled || saved.AI.Model != "llama3.2" {
-		t.Fatalf("not persisted or not loadable: %+v %v", saved.AI, err)
+}
+
+// Listing sends the key to the provider, which is what the privacy policy
+// governs: a local-only policy forbids the request as much as a completion.
+func TestLocalOnlyPolicyBlocksListingACloudProvider(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOpenAI)
+	c.AI.APIKey = "sk-test"
+	c.AI.DefaultPolicy = "local"
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.APIKey == "sk-test" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "AI model")
+	if cmd := m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("a forbidden provider was contacted for its models")
+	}
+	if m.modal == "ai-models" {
+		t.Fatal("a forbidden provider's models were offered")
+	}
+	if !strings.Contains(m.notice, "does not allow") {
+		t.Errorf("notice = %q", m.notice)
 	}
 }
 
@@ -182,10 +308,12 @@ func TestAPIKeyIsEditedMaskedAndNeverShown(t *testing.T) {
 func TestEscapeCancelsTheEditNotThePanel(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
+	// The endpoint row is typed directly; the model row goes through the
+	// picker, which is a different path.
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "AI endpoint")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	for _, r := range "llama3.2" {
+	for _, r := range "http://example" {
 		m.modalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEsc}))
@@ -196,8 +324,8 @@ func TestEscapeCancelsTheEditNotThePanel(t *testing.T) {
 	if m.modal != "settings" {
 		t.Errorf("Esc closed the panel instead of the edit: modal=%q", m.modal)
 	}
-	if m.cfg.AI.Model != "" {
-		t.Errorf("a cancelled edit was saved: %q", m.cfg.AI.Model)
+	if m.cfg.AI.Endpoint != "" {
+		t.Errorf("a cancelled edit was saved: %q", m.cfg.AI.Endpoint)
 	}
 }
 
@@ -206,7 +334,7 @@ func TestTypedRowKeepsNavigationKeysAsText(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
 	d.run(m.action("Open settings"))
-	selectSetting(t, m, "AI model")
+	selectSetting(t, m, "AI endpoint")
 	before := m.choice
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
 	for _, r := range "jk" {

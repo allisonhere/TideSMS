@@ -152,6 +152,10 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 	case "thread-themes":
 		title = "Thread accent"
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+	case "ai-models":
+		title = "Model · " + m.cfg.AI.Provider
+		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
+		hint = "↑↓ choose · Enter use · Esc cancel"
 	case "bubble-themes":
 		if m.bubbleDir == "out" {
 			title = "Outgoing bubble theme"

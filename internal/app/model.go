@@ -122,6 +122,9 @@ type Model struct {
 	// previewAfterFetch is the attachment id v is waiting on, so the viewer
 	// opens by itself once the real file has been downloaded.
 	previewAfterFetch string
+	// pendingModelLookup defers a model listing until the configuration it
+	// depends on has been saved and applied.
+	pendingModelLookup bool
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry
@@ -668,6 +671,8 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.logError("save draft", v.err)
 		}
 		return m, nil
+	case aiModelsMsg:
+		return m, m.applyAIModels(v)
 	case configMsg:
 		m.busy = false
 		if v.err != nil {
@@ -692,7 +697,14 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(m.startSession(true), m.loadCache())
 			}
 			m.layoutConversation()
+			if m.pendingModelLookup {
+				// A provider chosen a moment ago is only now in m.cfg, and the
+				// model lookup reads the configuration to know who to ask.
+				m.pendingModelLookup = false
+				return m, m.chooseAIModel()
+			}
 		}
+		m.pendingModelLookup = false
 		return m, nil
 	case mutationMsg:
 		m.busy = false

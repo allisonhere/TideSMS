@@ -476,6 +476,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 			}
 			m.busy = true
 			return func() tea.Msg { return mutationMsg{contact: &c, err: m.store.SaveContact(c)} }
+		case "ai-models":
+			return m.commitAIModel(m.choices[m.choice])
 		case "bubble-themes":
 			return m.commitBubbleTheme(m.choices[m.choice])
 		case "ai-policy":
