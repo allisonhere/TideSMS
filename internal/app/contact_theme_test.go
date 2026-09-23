@@ -86,75 +86,6 @@ func TestGroupThreadTakesOnlyItsOwnTheme(t *testing.T) {
 	}
 }
 
-// The settings panel edits whichever contact is selected, which need not be
-// the one on screen. Cycling one person's theme must not repaint another
-// person's conversation with a colour that will never be applied to it.
-func TestContactThemePreviewStaysOnItsOwnConversation(t *testing.T) {
-	m, _, _, d, _ := conversationFixture(t)
-	syncPhone(t, d)
-	openThreadByID(t, d, amyThread)
-	d.settle("history", func() bool { return len(m.history.view.Messages) > 0 })
-
-	before := m.conversationTheme().Name
-
-	// Edit somebody who is not the open conversation's recipient.
-	m.setPane(paneContacts)
-	m.contacts = append(m.contacts, contacts.Contact{
-		ID: "c-other", Name: "Someone Else", PhoneNumber: "+15559998888",
-	})
-	m.selected = len(m.filtered()) - 1
-	other, ok := m.selectedContact()
-	if !ok || other.PhoneNumber == m.recipient.PhoneNumber {
-		t.Skip("could not select a contact other than the recipient")
-	}
-
-	d.run(m.action("Open settings"))
-	selectSetting(t, m, "Contact theme")
-	for i := 0; i < 3; i++ {
-		m.settingsAdjust(1)
-	}
-	if _, previewing := m.settingsContactPreview(); previewing {
-		t.Error("a preview was offered for a contact whose conversation is not open")
-	}
-	if after := m.conversationTheme().Name; after != before {
-		t.Errorf("the open conversation repainted from another contact's preview: %q -> %q", before, after)
-	}
-}
-
-// The preview still works where it belongs: on the conversation of the contact
-// actually being edited.
-func TestContactThemePreviewAppliesToItsOwnConversation(t *testing.T) {
-	m, _, _, d, _ := conversationFixture(t)
-	syncPhone(t, d)
-	openThreadByID(t, d, amyThread)
-	d.settle("history", func() bool { return len(m.history.view.Messages) > 0 })
-	if m.recipient.PhoneNumber == "" {
-		t.Skip("fixture opened no recipient")
-	}
-
-	// Select the recipient themselves, as pressing t on them would.
-	m.setPane(paneContacts)
-	for i, c := range m.filtered() {
-		if c.PhoneNumber == m.recipient.PhoneNumber {
-			m.selected = i
-		}
-	}
-	if c, ok := m.settingsContact(); !ok || c.PhoneNumber != m.recipient.PhoneNumber {
-		t.Skip("the recipient is not selectable in this fixture")
-	}
-
-	d.run(m.action("Open settings"))
-	selectSetting(t, m, "Contact theme")
-	m.settingsAdjust(1)
-	preview, ok := m.settingsContactPreview()
-	if !ok {
-		t.Fatal("no preview offered for the conversation's own contact")
-	}
-	if preview != "" && m.conversationTheme().Name != preview {
-		t.Errorf("the preview did not reach its own conversation: want %q, got %q", preview, m.conversationTheme().Name)
-	}
-}
-
 // A row prefers a conversation palette to a bubble palette, and within each
 // the thread's own setting to the contact's. ThemeOut never colours a row: it
 // is your own messages in their thread, not a mark of who they are.
@@ -215,43 +146,7 @@ func rowTheme(m *Model, phone string) string {
 	return "(absent)"
 }
 
-// A palette being chosen shows in the sidebar at the same moment it shows in
-// the conversation. A preview that reached only half of what it recolours is
-// worse than none: the row would keep contradicting the conversation until the
-// choice was committed.
-func TestContactThemePreviewReachesTheSidebar(t *testing.T) {
-	m, _, _, d, _ := conversationFixture(t)
-	syncPhone(t, d)
-	openThreadByID(t, d, amyThread)
-	d.settle("history", func() bool { return len(m.history.view.Messages) > 0 })
-	phone := m.recipient.PhoneNumber
-
-	d.run(m.action("Open settings"))
-	selectSetting(t, m, "Contact theme")
-	m.settingsAdjust(1)
-
-	preview, ok := m.settingsContactPreview()
-	if !ok || preview == "" {
-		t.Fatalf("no preview offered: %q ok=%v", preview, ok)
-	}
-	if got := rowTheme(m, phone); got != preview {
-		t.Errorf("the contact row did not follow the preview: row %q, preview %q", got, preview)
-	}
-	if got := m.threadThemes()[amyThread]; got != preview {
-		t.Errorf("the thread row did not follow the preview: row %q, preview %q", got, preview)
-	}
-	if got := m.conversationTheme().Name; got != preview {
-		t.Errorf("the conversation did not follow the preview: %q", got)
-	}
-
-	// Leaving the panel drops the preview and the row returns to what is stored.
-	m.modal = ""
-	if _, _, ok := m.pendingContactTheme(); ok {
-		t.Error("a preview survived closing the panel")
-	}
-}
-
-// The picker t opens previews the same way the settings row does.
+// The picker t opens previews the sidebar row as it is moved through.
 func TestThemePickerPreviewsTheSidebarRow(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
@@ -300,5 +195,73 @@ func TestPreviewColoursOnlyItsOwnRow(t *testing.T) {
 	}
 	if got := rowTheme(m, other.PhoneNumber); got == m.choices[2] {
 		t.Errorf("a different contact borrowed the preview: %q", got)
+	}
+}
+
+// Changing a contact's theme from the thread list acts on the highlighted
+// thread's person. It used to fall back to the hidden contact list's cursor,
+// which sits at zero, so the theme landed on whoever sorted first.
+func TestContactThemeTargetsTheHighlightedThread(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.settle("threads", func() bool { return len(m.history.threads) > 0 })
+
+	var solo *domain.Thread
+	for i := range m.history.threads {
+		if !m.history.threads[i].IsGroup && len(m.history.threads[i].Participants) == 1 {
+			solo = &m.history.threads[i]
+			break
+		}
+	}
+	if solo == nil {
+		t.Skip("fixture has no one-to-one thread")
+	}
+	// Someone who sorts first, and the person the thread is actually with.
+	m.contacts = append([]contacts.Contact{{ID: "c-first", Name: "Aaron", PhoneNumber: "+15550009999"}}, m.contacts...)
+	m.contacts = append(m.contacts, contacts.Contact{ID: "c-thread", Name: "Zed", PhoneNumber: solo.Participants[0].Number})
+	for i := range m.contacts {
+		if m.contacts[i].PhoneNumber == solo.Participants[0].Number && m.contacts[i].ID != "c-thread" {
+			m.contacts = append(m.contacts[:i], m.contacts[i+1:]...)
+			break
+		}
+	}
+	m.selected = 0
+	m.setPane(paneThreads)
+	m.history.threadSelected = solo.ID
+
+	got, ok := m.targetContact()
+	if !ok || got.ID != "c-thread" {
+		t.Errorf("the thread list targeted %q (%v), not the highlighted thread's contact", got.Name, ok)
+	}
+
+	// An open conversation targets its recipient even without the composer.
+	m.openThread(*solo)
+	if got, ok := m.targetContact(); !ok || got.ID != "c-thread" {
+		t.Errorf("the conversation targeted %q (%v), not its recipient", got.Name, ok)
+	}
+
+	// The contacts pane is still about its own cursor.
+	m.setPane(paneContacts)
+	if got, ok := m.selectedContact(); ok {
+		if target, _ := m.targetContact(); target.ID != got.ID {
+			t.Errorf("the contacts pane targeted %q, not the selected %q", target.Name, got.Name)
+		}
+	}
+}
+
+// A contact saved without a country code is still the contact of a thread
+// addressed with one, so Contact theme stays in settings for that thread.
+func TestThreadContactMatchesNumbersWrittenDifferently(t *testing.T) {
+	m, _, _, _, _ := conversationFixture(t)
+	m.contacts = []contacts.Contact{{ID: "c-amy", Name: "Amy", PhoneNumber: "8165550182"}}
+	thread := domain.Thread{ID: "t-amy", DisplayName: "Amy", Participants: []domain.Participant{{Number: "+18165550182"}}}
+	if got := m.threadContact(thread); got.ID != "c-amy" {
+		t.Errorf("the thread's contact was not found across number formats: %+v", got)
+	}
+
+	// Two contacts sharing the key are ambiguous, so neither is chosen.
+	m.contacts = append(m.contacts, contacts.Contact{ID: "c-other", Name: "Other", PhoneNumber: "1-816-555-0182"})
+	if got := m.threadContact(thread); got.ID != "" {
+		t.Errorf("an ambiguous number resolved to %q", got.Name)
 	}
 }

@@ -210,16 +210,7 @@ func (m *Model) openThread(t domain.Thread) tea.Cmd {
 		m.history.view = v
 		m.history.limit = max(m.history.limit, len(v.Messages))
 	}
-	c := contacts.Contact{Name: t.DisplayName}
-	if len(t.Participants) == 1 {
-		c.PhoneNumber = t.Participants[0].Number
-		for _, contact := range m.contacts {
-			if contact.PhoneNumber == c.PhoneNumber {
-				c = contact
-				break
-			}
-		}
-	}
+	c := m.threadContact(t)
 	// Promote a legacy number draft only for an unambiguous single-person thread.
 	if _, ok := m.drafts[t.ID]; !ok && len(t.Participants) == 1 {
 		if legacy, ok := m.drafts[c.PhoneNumber]; ok && legacy.Body != "" {
@@ -241,6 +232,23 @@ func (m *Model) selectedThread() *domain.Thread {
 		}
 	}
 	return nil
+}
+
+// threadDrafts is the unsent text of each thread that has some, keyed by
+// thread id, for the list to show. The thread being typed in is left out: its
+// draft is on screen already, in the composer.
+func (m *Model) threadDrafts() map[string]string {
+	out := map[string]string{}
+	typing := ""
+	if m.history.pane == paneComposer && m.history.active != nil {
+		typing = m.history.active.ID
+	}
+	for _, t := range m.history.threads {
+		if d := m.drafts[t.ID]; t.ID != typing && strings.TrimSpace(d.Body) != "" {
+			out[t.ID] = d.Body
+		}
+	}
+	return out
 }
 
 // threadThemes maps each thread to the palette its row should show.
@@ -301,6 +309,15 @@ func (m *Model) threadThemes() map[string]string {
 				}
 			}
 		}
+		// The details screen is drafting this conversation's colours, which
+		// it saves in place of any the thread already had.
+		if theme, ok := m.detailsPreview(detailsTheme); ok && m.history.active != nil && m.history.active.ID == t.ID {
+			in, _ := m.detailsPreview(detailsIn)
+			if name := themes.First(theme, in); name != "" {
+				out[t.ID] = name
+			}
+			continue
+		}
 		threadTheme := t.ThemeID
 		if previewingThread && m.history.active.ID == t.ID {
 			threadTheme = previewThread
@@ -332,7 +349,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery, Group: m.history.active != nil && m.history.active.IsGroup})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -405,7 +422,7 @@ func (m *Model) conversationTheme() tideui.Theme {
 	if preview, ok := m.previewing("themes", "thread-themes"); ok {
 		override = preview
 	}
-	if preview, ok := m.settingsContactPreview(); ok {
+	if preview, ok := m.detailsPreview(detailsTheme); ok {
 		override = preview
 	}
 	return themes.Resolve(global, override, identity)
@@ -446,6 +463,22 @@ func (m *Model) bubblePalette(conv tideui.Theme, outgoing bool) themes.Bubble {
 	}
 	if preview, ok := m.bubblePickerPreview(outgoing); ok {
 		name = preview
+	}
+	row := detailsIn
+	if outgoing {
+		row = detailsOut
+	}
+	if preview, ok := m.detailsPreview(row); ok {
+		// "automatic" on the details screen means no override of the
+		// conversation's own, so the global default still applies.
+		name = preview
+		if name == "" {
+			if outgoing {
+				name = m.cfg.Conversation.OutgoingTheme
+			} else {
+				name = m.cfg.Conversation.IncomingTheme
+			}
+		}
 	}
 	return themes.BubbleFor(conv, name, outgoing)
 }
@@ -681,6 +714,8 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			m.modal = "help"
 		case ",":
 			m.openSettings()
+		case "i":
+			return m.openDetails()
 		case "q", "ctrl+c":
 			return m.quit()
 		case "c":
@@ -727,12 +762,14 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			// once and one that is still only a thumbnail is fetched first. The
 			// viewer is opened on the message either way, so the download has
 			// somewhere to report to and the other parts stay reachable.
-			for _, a := range msg.Attachments {
-				if p := localFile(a); p != "" {
-					return externalPreview(p)
+			m.openMediaViewer(*msg)
+			for i, a := range msg.Attachments {
+				if localFile(a) != "" {
+					m.mediaIndex = i
+					m.modal = ""
+					return m.viewLocal(a)
 				}
 			}
-			m.openMediaViewer(*msg)
 			return m.previewAttachment()
 		}
 	case "r":
@@ -775,6 +812,8 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		m.modal = "help"
 	case ",":
 		m.openSettings()
+	case "i":
+		return m.openDetails()
 	}
 	if h.view.Selected < 3 && h.searchQuery == "" && (k.String() == "k" || k.String() == "up" || k.String() == "pgup" || k.String() == "g") {
 		return tea.Batch(m.loadCache(), m.requestOlder(true))
@@ -796,10 +835,11 @@ func (m *Model) quoteMessage(body string) {
 }
 
 func (m *Model) sendHistory() tea.Cmd {
+	retry := m.history.retryID
 	if !m.prepareSend() {
 		return nil
 	}
-	return m.deliverPending()
+	return m.holdSend(retry)
 }
 
 func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
@@ -894,10 +934,15 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 				h.jump = nil
 			}
 			m.layoutConversation()
+			// Photos already downloaded in a format the app cannot draw are
+			// converted in the background, so the thread shows them without the
+			// reader having to ask.
+			convert := m.convertAttachments(v.messages)
 			if h.wantsRead {
 				h.wantsRead = false
-				return true, m.markVisibleRead()
+				return true, tea.Batch(m.markVisibleRead(), convert)
 			}
+			return true, convert
 		}
 		return true, nil
 	case syncMsg:

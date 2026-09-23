@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/media"
 	"strings"
 	"time"
 )
@@ -152,7 +154,24 @@ func (m Message) Thread() Thread {
 	if strings.HasPrefix(backendID, "local-") {
 		backendID = ""
 	}
-	return Thread{ID: m.ThreadID, DeviceID: m.DeviceID, BackendID: backendID, Participants: m.Participants, LastMessage: m.Body, LastTimestamp: m.Timestamp, IsGroup: m.IsGroup}
+	return Thread{ID: m.ThreadID, DeviceID: m.DeviceID, BackendID: backendID, Participants: m.Participants, LastMessage: m.Preview(), LastTimestamp: m.Timestamp, IsGroup: m.IsGroup}
+}
+
+// Preview is the message as a thread list shows it: its text, or for a message
+// that is only media, what kind of media it carries.
+func (m Message) Preview() string {
+	if m.Body != "" || len(m.Attachments) == 0 {
+		return m.Body
+	}
+	if len(m.Attachments) > 1 {
+		return fmt.Sprintf("%d attachments", len(m.Attachments))
+	}
+	a := m.Attachments[0]
+	kind, _ := media.Describe(a.MIMEType, a.Filename, a.Size)
+	if kind == "Image" {
+		return "Photo"
+	}
+	return kind
 }
 
 type MessageQuery struct{ Offset, Limit int }

@@ -184,6 +184,73 @@ func (m *Model) deliverPending() tea.Cmd {
 	}
 }
 
+// sendHold is a message waiting out its undo window. The draft stays in the
+// composer, untouched and locked, until the window closes, so undoing is only a
+// matter of forgetting the hold.
+type sendHold struct {
+	seq   int
+	until time.Time
+	// retry is the failed message this send was replacing, put back on undo so
+	// a later send still retries it in place.
+	retry string
+}
+
+type holdTickMsg struct{ seq int }
+
+// holdSend starts the undo window for the prepared message, or delivers at
+// once when the window is off. An offline phone skips the window: its prompt
+// already stops the message from leaving.
+func (m *Model) holdSend(retry string) tea.Cmd {
+	secs := m.cfg.Composer.UndoSeconds
+	if secs <= 0 || m.pending == nil || !m.deviceOnline(m.pending.msg.DeviceID) {
+		return m.deliverPending()
+	}
+	m.holdSeq++
+	m.hold = &sendHold{seq: m.holdSeq, until: time.Now().Add(time.Duration(secs) * time.Second), retry: retry}
+	m.sending = true
+	m.editor.Focus(false)
+	return m.tickHold()
+}
+
+// tickHold refreshes the countdown and wakes again on the next whole second.
+func (m *Model) tickHold() tea.Cmd {
+	left := time.Until(m.hold.until)
+	secs := int((left + time.Second - 1) / time.Second)
+	m.notify(fmt.Sprintf("Sending in %ds · Esc undo · Enter send now", secs), false)
+	wait := left - time.Duration(secs-1)*time.Second
+	seq := m.hold.seq
+	return tea.Tick(wait, func(time.Time) tea.Msg { return holdTickMsg{seq} })
+}
+
+func (m *Model) holdTick(v holdTickMsg) tea.Cmd {
+	if m.hold == nil || m.hold.seq != v.seq {
+		return nil
+	}
+	if time.Until(m.hold.until) > 0 {
+		return m.tickHold()
+	}
+	return m.releaseHold()
+}
+
+// releaseHold ends the undo window and sends.
+func (m *Model) releaseHold() tea.Cmd {
+	m.hold = nil
+	m.sending = false
+	return m.deliverPending()
+}
+
+// cancelHold takes the message back. Nothing has been stored or sent, and the
+// draft never left the composer.
+func (m *Model) cancelHold() tea.Cmd {
+	m.history.retryID = m.hold.retry
+	m.hold = nil
+	m.pending = nil
+	m.sending = false
+	m.editor.Focus(m.focus)
+	m.notify("Not sent · your draft is kept", false)
+	return nil
+}
+
 // resolveOfflineSend handles the offline-send prompt.
 func (m *Model) resolveOfflineSend(choice string) tea.Cmd {
 	p := m.pending

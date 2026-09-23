@@ -52,6 +52,9 @@ type Options struct {
 	// as tall as it is wide.
 	CellWidth, CellHeight int
 	Timestamps, Query     string
+	// Group names the sender of every incoming message. One-to-one, the
+	// conversation's title already does, so those carry only the time.
+	Group bool
 }
 type mediaStamp struct {
 	path     string
@@ -66,9 +69,87 @@ type imageTransmission struct {
 
 type renderedMessage struct {
 	message       domain.Message
+	shape         shape
 	lines         []string
 	media         []mediaStamp
 	transmissions []string
+}
+
+// shape is the part of a message's drawing that its neighbours decide: whether
+// it opens a run with a sender line, carries its own status, and is followed by
+// a gap. It is part of the cache key, since a new message can change all three.
+type shape struct{ header, status, spacer bool }
+
+// runGap is how close together two messages from the same sender must be for
+// the second to continue the first's run without a header of its own.
+const runGap = 5 * time.Minute
+
+// continues reports whether msg joins prev's run: same sender and direction,
+// same day, and sent soon after.
+func continues(prev, msg domain.Message) bool {
+	if prev.Direction != msg.Direction || prev.Sender != msg.Sender {
+		return false
+	}
+	if prev.Timestamp.Local().Format("2006-01-02") != msg.Timestamp.Local().Format("2006-01-02") {
+		return false
+	}
+	gap := msg.Timestamp.Sub(prev.Timestamp)
+	return gap >= 0 && gap <= runGap
+}
+
+// settled statuses need not be repeated on every message: the newest outgoing
+// message shows where things stand, and anything unsettled shows its own.
+func settled(s domain.Status) bool {
+	switch s {
+	case domain.Sent, domain.Submitted, domain.Delivered, domain.Read:
+		return true
+	}
+	return false
+}
+
+// shapes decides each message's shape from its neighbours.
+func (m *Model) shapes() []shape {
+	n := len(m.Messages)
+	cont := make([]bool, n)
+	lastOut := -1
+	unread := false
+	for i, msg := range m.Messages {
+		// The unread boundary is drawn above the first unread message, and a
+		// run never continues across it.
+		boundary := msg.Unread && !unread
+		unread = unread || msg.Unread
+		cont[i] = i > 0 && !boundary && continues(m.Messages[i-1], msg)
+		if msg.Direction == domain.Outgoing {
+			lastOut = i
+		}
+	}
+	out := make([]shape, n)
+	for i, msg := range m.Messages {
+		highlighted := m.Options.HighlightID != "" && msg.ID == m.Options.HighlightID
+		out[i] = shape{
+			header: !cont[i] || highlighted,
+			status: msg.Direction == domain.Outgoing && (i == lastOut || !settled(msg.Status)),
+			spacer: i == n-1 || !cont[i+1],
+		}
+	}
+	return out
+}
+
+// drawable is the image to draw for a part: the part itself once fetched, or
+// a converted copy of it when it is in a format the app cannot decode (a HEIC
+// photo, say); otherwise the backend's preview. Falling back to the preview
+// matters: a fetched photo the app cannot read used to replace the preview
+// that was showing, so downloading it made the picture disappear.
+func drawable(a domain.Attachment) string {
+	if a.LocalPath != "" {
+		if p, ok := media.Displayable(a.LocalPath); ok {
+			return p
+		}
+	}
+	if media.Readable(a.ThumbPath) {
+		return a.ThumbPath
+	}
+	return ""
 }
 
 func attachmentStamps(msg domain.Message, inline bool) []mediaStamp {
@@ -77,7 +158,7 @@ func attachmentStamps(msg domain.Message, inline bool) []mediaStamp {
 	}
 	stamps := make([]mediaStamp, 0, len(msg.Attachments))
 	for _, a := range msg.Attachments {
-		path, _ := a.Preview()
+		path := drawable(a)
 		stamp := mediaStamp{path: path}
 		if info, err := os.Stat(path); err == nil {
 			stamp.size = info.Size()
@@ -237,7 +318,9 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 	m.transmissions = nil
 	lastDate := ""
 	boundary := false
-	for _, msg := range m.Messages {
+	shapes := m.shapes()
+	for i, msg := range m.Messages {
+		sh := shapes[i]
 		start := len(m.lines)
 		date := msg.Timestamp.Local().Format("2006-01-02")
 		if opts.Dates && date != lastDate {
@@ -252,12 +335,13 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			m.lines = append(m.lines, r.Styles.Badge.Render("── Unread messages ──"))
 			boundary = true
 		}
-		// Headers depend on neighbouring messages; the bubble itself does not.
+		// Date lines and the unread boundary depend on neighbouring messages and
+		// are drawn fresh; so does a message's shape, which the cache is keyed on.
 		// File metadata invalidates image caches when downloads arrive or change.
 		bodyStart := len(m.lines)
 		transmissionStart := len(m.transmissions)
 		stamps := attachmentStamps(msg, opts.InlineMedia)
-		if cached, ok := cache[msg.ID]; ok && reflect.DeepEqual(cached.media, stamps) && reflect.DeepEqual(cached.message, msg) {
+		if cached, ok := cache[msg.ID]; ok && cached.shape == sh && reflect.DeepEqual(cached.media, stamps) && reflect.DeepEqual(cached.message, msg) {
 			m.lines = append(m.lines, cached.lines...)
 			for _, tx := range cached.transmissions {
 				m.transmissions = append(m.transmissions, imageTransmission{message: len(m.starts), data: tx})
@@ -273,6 +357,12 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			stamp = msg.Timestamp.Local().Format("Jan 2, 2006 15:04:05")
 		}
 		label := sender + " · " + stamp
+		// One-to-one, the pane title already names the other person, so their
+		// messages carry only the time.
+		if !opts.Group && msg.Direction == domain.Incoming {
+			label = stamp
+		}
+		status := string(msg.Status)
 		body := Safe(msg.Body)
 		// A media-only message has no text; the attachment block is its
 		// content, so the empty-body placeholder would be misleading.
@@ -310,7 +400,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			// shows something without waiting on a download. Anything else keeps
 			// the compact block.
 			if opts.InlineMedia {
-				image, _ := a.Preview()
+				image := drawable(a)
 				// A terminal that speaks the graphics protocol draws the real
 				// image; the rest get braille dots, which pack 2x4 sub-pixels
 				// per cell and so keep fine detail in the same footprint. Either
@@ -357,7 +447,13 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		for _, line := range wrapped {
 			content = max(content, ansi.StringWidth(line))
 		}
-		width := max(ansi.StringWidth(label), content+frame)
+		width := content + frame
+		if sh.header {
+			width = max(width, ansi.StringWidth(label))
+		}
+		if sh.status {
+			width = max(width, ansi.StringWidth(status))
+		}
 		indent, labelPad := 0, ""
 		if msg.Direction == domain.Outgoing {
 			indent = max(0, w-width-selectionWidth-marginWidth)
@@ -371,7 +467,9 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			// A brief, unmissable cue that this is the message that was jumped to.
 			labelLine = r.Styles.SearchMatch.Render("▐ " + ansi.Truncate(label, max(0, w-indent-selectionWidth-2), "…"))
 		}
-		m.lines = append(m.lines, labelLine)
+		if sh.header {
+			m.lines = append(m.lines, labelLine)
+		}
 		tl, tr, bl, br := "╭", "╮", "╰", "╯"
 		if opts.Corners == "square" {
 			tl, tr, bl, br = "┌", "┐", "└", "┘"
@@ -382,20 +480,23 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		// background.
 		filling := bubbles && opts.Fill
 		paint := func(s string) string { return s }
-		framePaint := paint
+		bubble := opts.bubbleFor(r.Styles.Theme, msg.Direction)
+		// The frame glyphs are drawn in their own style: the conversation's
+		// accent, or the frame colour a chosen bubble theme names. Painting a
+		// colour over glyphs already styled does not recolour them, since the
+		// inner style sets its own foreground, so the choice is made here.
+		edge := r.Styles.Badge
+		if bubble.Frame != "" {
+			edge = lipgloss.NewStyle().Foreground(bubble.Frame).Bold(true)
+		}
 		if filling {
-			bubble := opts.bubbleFor(r.Styles.Theme, msg.Direction)
 			style := lipgloss.NewStyle().Background(bubble.Fill).Foreground(bubble.Text)
 			paint = func(s string) string { return tideui.StyleOver(style, s) }
-			framePaint = paint
-			if bubble.Frame != "" {
-				// A chosen theme may colour the frame differently from the body.
-				frameStyle := lipgloss.NewStyle().Background(bubble.Fill).Foreground(bubble.Frame)
-				framePaint = func(s string) string { return tideui.StyleOver(frameStyle, s) }
-			}
+			edge = edge.Background(bubble.Fill)
 		}
+		framePaint := paint
 		if bubbles {
-			m.lines = append(m.lines, pad+framePaint(r.Styles.Badge.Render(tl+strings.Repeat("─", content+2)+tr)))
+			m.lines = append(m.lines, pad+framePaint(edge.Render(tl+strings.Repeat("─", content+2)+tr)))
 		}
 		for _, line := range wrapped {
 			// The trailing gap is measured before highlighting, which adds
@@ -405,24 +506,26 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			if opts.Query != "" {
 				text = highlight(r, text, opts.Query)
 			}
-			row := r.Styles.Badge.Render("│ ") + text
+			row := edge.Render("│ ") + text
 			if bubbles {
-				row += gap + r.Styles.Badge.Render(" │")
+				row += gap + edge.Render(" │")
 			}
 			m.lines = append(m.lines, pad+paint(row))
 		}
 		if bubbles {
-			m.lines = append(m.lines, pad+framePaint(r.Styles.Badge.Render(bl+strings.Repeat("─", content+2)+br)))
+			m.lines = append(m.lines, pad+framePaint(edge.Render(bl+strings.Repeat("─", content+2)+br)))
 		}
-		if msg.Direction == domain.Outgoing {
+		if sh.status {
 			// The status sits against the same right edge as the sender and time,
 			// so an outgoing message reads as one block rather than three.
-			statusPad := strings.Repeat(" ", max(0, width-ansi.StringWidth(string(msg.Status))))
-			m.lines = append(m.lines, pad+statusPad+r.Styles.DetailMeta.Render(string(msg.Status)))
+			statusPad := strings.Repeat(" ", max(0, width-ansi.StringWidth(status)))
+			m.lines = append(m.lines, pad+statusPad+r.Styles.DetailMeta.Render(status))
 		}
-		m.lines = append(m.lines, "")
+		if sh.spacer {
+			m.lines = append(m.lines, "")
+		}
 		if msg.ID != "" {
-			entry := renderedMessage{message: msg, lines: append([]string(nil), m.lines[bodyStart:]...), media: stamps}
+			entry := renderedMessage{message: msg, shape: sh, lines: append([]string(nil), m.lines[bodyStart:]...), media: stamps}
 			entry.message.Attachments = append([]domain.Attachment(nil), msg.Attachments...)
 			for _, tx := range m.transmissions[transmissionStart:] {
 				entry.transmissions = append(entry.transmissions, tx.data)

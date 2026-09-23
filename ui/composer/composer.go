@@ -13,6 +13,9 @@ type osClipboard struct{}
 func (osClipboard) Read() (string, error) { return clipboard.ReadAll() }
 func (osClipboard) Write(s string) error  { return clipboard.WriteAll(s) }
 
+// placeholder is the hint shown in an empty composer.
+const placeholder = "Write a message…"
+
 type Model struct {
 	editor  ripple.Model
 	markers []Marker
@@ -29,7 +32,10 @@ type CancelMsg struct{}
 func New(mode string) Model {
 	m := Model{editor: ripple.New()}
 	m.editor.SetClipboard(osClipboard{})
-	m.editor.SetPlaceholder("Write a message…")
+	m.editor.SetPlaceholder(placeholder)
+	// Ripple starts focused, which would draw a cursor in a composer the host
+	// has not focused yet. The host focuses it when the composer is entered.
+	m.editor.Blur()
 	m.SetMode(mode)
 	return m
 }
@@ -120,6 +126,11 @@ func (m Model) View(accent lipgloss.Color) string {
 	cursor := lipgloss.NewStyle().Background(accent).Foreground(lipgloss.Color("#1e1e2e"))
 	selected := lipgloss.NewStyle().Background(lipgloss.Color("#45475a"))
 	opts := ripple.Options{Cursor: cursor.Render(" "), CursorRune: func(s string) string { return cursor.Render(s) }, Selected: func(s string) string { return selected.Render(s) }, Placeholder: func(s string) string { return lipgloss.NewStyle().Foreground(lipgloss.Color("#9399b2")).Render(s) }}
+	// Ripple draws the cursor in place of the placeholder's first rune rather
+	// than over it, so the cursor carries that rune or the hint loses a letter.
+	if m.editor.Value() == "" {
+		opts.Cursor = cursor.Render(string([]rune(placeholder)[:1]))
+	}
 	if len(m.markers) > 0 {
 		mark := lipgloss.NewStyle().Foreground(accent).Underline(true)
 		opts.StyleKey = func(offset int) string {

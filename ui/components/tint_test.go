@@ -111,15 +111,26 @@ func TestThreadsTintFromTheSuppliedMap(t *testing.T) {
 		{ID: "t1", DisplayName: "Amy", LastMessage: "hi"},
 		{ID: "t2", DisplayName: "Family", LastMessage: "hi"},
 	}
-	out := Threads(testRenderer(), ts, "t2", 30, 12, map[string]string{"t1": "nord"})
-	if !strings.Contains(out, sgrFor(t, "nord")) {
-		t.Error("a thread with a theme was not tinted")
+	out := Threads(testRenderer(), ts, "t2", 30, 12, map[string]string{"t1": "nord"}, nil)
+	nord := themes.Base("nord")
+	name := lipgloss.NewStyle().Background(nord.BorderFocus).Foreground(nord.Bg).Bold(true).Render(" Amy ")
+	preview := lipgloss.NewStyle().Background(nord.Bg).Foreground(nord.Fg).Render(" hi ")
+	if !strings.Contains(out, name) {
+		t.Errorf("a themed thread's name was not drawn on its accent: %q", out)
+	}
+	if !strings.Contains(out, preview) {
+		t.Errorf("a themed thread's preview was not drawn in its colours: %q", out)
+	}
+	// The chip carries its own background and text, so it stays on the
+	// selected row, where a bare foreground tint would not.
+	if selected := Threads(testRenderer(), ts, "t1", 30, 12, map[string]string{"t1": "nord"}, nil); !strings.Contains(selected, name) {
+		t.Errorf("the selected themed row lost its chip: %q", selected)
 	}
 	if !strings.Contains(ansi.Strip(out), "Family") {
 		t.Error("an unthemed thread stopped rendering")
 	}
 	// A thread absent from the map has no theme of its own.
-	if out2 := Threads(testRenderer(), ts, "t2", 30, 12, nil); strings.Contains(out2, sgrFor(t, "nord")) {
+	if out2 := Threads(testRenderer(), ts, "t2", 30, 12, nil, nil); strings.Contains(out2, sgrFor(t, "nord")) {
 		t.Error("a thread was tinted with no themes supplied")
 	}
 }

@@ -42,7 +42,10 @@ func fixture(t *testing.T) (*Model, *fakeBackend, *storage.Store) {
 		}
 	})
 	f := &fakeBackend{}
-	m := New(context.Background(), s, f, config.Default(), filepath.Join(dir, "config.toml"), slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
+	cfg := config.Default()
+	// Sends leave at once here; the undo window has tests of its own.
+	cfg.Composer.UndoSeconds = 0
+	m := New(context.Background(), s, f, cfg, filepath.Join(dir, "config.toml"), slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
 	m.loaded = true
 	m.contacts = []contacts.Contact{{ID: "amy", Name: "Amy", PhoneNumber: "+15551234567", Theme: "rose"}, {ID: "chris", Name: "Chris", PhoneNumber: "+15557654321"}}
 	m.devices, _ = f.Devices(context.Background())

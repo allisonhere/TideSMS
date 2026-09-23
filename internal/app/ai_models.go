@@ -159,5 +159,5 @@ func (m *Model) commitAIModel(choice string) tea.Cmd {
 	}
 	c := m.cfg
 	c.AI.Model = choice
-	return m.saveConfig(c)
+	return m.stageConfig(c)
 }

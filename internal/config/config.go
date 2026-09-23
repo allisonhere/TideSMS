@@ -60,6 +60,9 @@ type Config struct {
 		// phone messaging app does. Turn it off for terminals that cannot tell
 		// the two apart; Enter then inserts a newline again.
 		EnterSends bool `toml:"enter_sends"`
+		// UndoSeconds holds a sent message this long before it leaves, so an
+		// accidental Enter can be taken back with Esc. Zero sends at once.
+		UndoSeconds int `toml:"undo_seconds"`
 	} `toml:"composer"`
 	KDEConnect struct {
 		PreferredDevice string `toml:"preferred_device"`
@@ -100,6 +103,7 @@ func Default() Config {
 	c.General.Theme = "tide"
 	c.Composer.Mode = "normal"
 	c.Composer.EnterSends = true
+	c.Composer.UndoSeconds = 4
 	c.Sync.InitialMessages = 100
 	c.Sync.PageSize = 100
 	c.Notifications.Enabled = true
@@ -136,6 +140,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Sync.InitialMessages < 1 || c.Sync.InitialMessages > 1000 || c.Sync.PageSize < 1 || c.Sync.PageSize > 1000 {
 		return Default(), fmt.Errorf("sync batch sizes must be between 1 and 1000")
+	}
+	if c.Composer.UndoSeconds < 0 || c.Composer.UndoSeconds > 30 {
+		return Default(), fmt.Errorf("composer undo_seconds must be between 0 and 30")
 	}
 	if c.Conversation.Timestamps != "smart" && c.Conversation.Timestamps != "full" {
 		return Default(), fmt.Errorf("conversation timestamps must be smart or full")

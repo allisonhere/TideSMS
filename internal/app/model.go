@@ -81,19 +81,24 @@ type Model struct {
 	fields                                          []textinput.Model
 	field                                           int
 	editing                                         contacts.Contact
-	// themeCursor, contactCursor and the bubble cursors hold the value
+	// themeCursor and the bubble cursors hold the value
 	// highlighted in the static settings panel before it is committed, so the
 	// theme previews live.
 	themeCursor         int
-	contactCursor       int
 	aiProviderCursor    int
 	aiPolicyCursor      int
 	localProviderStatus map[ai.Provider]localProviderStatus
 	lookupAfterKey      bool
 	// settingEdit is the settings panel's inline text editor, used by the rows
 	// that are typed rather than cycled.
-	settingEdit            bool
-	settingEditing         settingID
+	settingEdit    bool
+	settingEditing settingID
+	// settingsSaved is the configuration as it stood when the panel opened or
+	// was last saved. The panel edits m.cfg as a draft, so every change
+	// previews everywhere at once; Ctrl+S writes it and Esc restores this.
+	settingsSaved config.Config
+	// details is the draft of the open conversation's details screen.
+	details                detailsState
 	settingInput           textinput.Model
 	bubbleInCursor         int
 	bubbleOutCursor        int
@@ -124,6 +129,10 @@ type Model struct {
 	// previewAfterFetch is the attachment id v is waiting on, so the viewer
 	// opens by itself once the real file has been downloaded.
 	previewAfterFetch string
+	// converting and convertFailed track photos being converted to a format
+	// the app can draw, so a thread reloaded every few seconds neither starts
+	// the same conversion twice nor retries one that cannot succeed.
+	converting, convertFailed map[string]bool
 	// settingsRow is the panel's cursor while a picker opened from it borrows
 	// m.choice, so leaving the picker returns to the row it was opened from.
 	settingsRow int
@@ -132,6 +141,9 @@ type Model struct {
 	modelListFailed string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
+	// hold is a sent message still inside its undo window.
+	hold    *sendHold
+	holdSeq int
 	outboxEntries  []outboxEntry
 	schedInput     textinput.Model
 	queuedCount    int
@@ -169,6 +181,9 @@ type mutationMsg struct {
 	contact *contacts.Contact
 	deleted string
 	err     error
+	// restyle marks a save that only changed a contact's colours. It must not
+	// start a message to them the way adding or editing a contact does.
+	restyle bool
 }
 type configMsg struct {
 	cfg config.Config
@@ -383,6 +398,72 @@ func (m *Model) selectedContact() (contacts.Contact, bool) {
 	m.selected = max(0, min(m.selected, len(cs)-1))
 	return cs[m.selected], true
 }
+
+// targetContact resolves the contact a contact command acts on: the one the
+// user is looking at, not merely the contact list's cursor. With the history
+// view, only the contacts pane is about that cursor; the thread list means the
+// highlighted thread's person and a conversation means its recipient. Falling
+// back to the cursor there picked whichever contact sorted first, because the
+// cursor sits at zero while the list is hidden. A group or an unsaved number
+// has no contact to act on.
+func (m *Model) targetContact() (contacts.Contact, bool) {
+	saved := func(c contacts.Contact) (contacts.Contact, bool) {
+		return c, c.ID != "" || c.Synced
+	}
+	if m.history.enabled && m.history.pane != paneContacts {
+		if m.history.pane == paneThreads {
+			if len(m.history.threads) == 0 {
+				return contacts.Contact{}, false
+			}
+			// The list highlights its first row until a thread is chosen.
+			highlighted := m.history.threads[0]
+			for _, t := range m.history.threads {
+				if t.ID == m.history.threadSelected {
+					highlighted = t
+				}
+			}
+			return saved(m.threadContact(highlighted))
+		}
+		return saved(m.recipient)
+	}
+	if m.focus {
+		if c, ok := saved(m.recipient); ok {
+			return c, true
+		}
+	}
+	return m.selectedContact()
+}
+
+// threadContact is the contact a thread is with: the saved contact for a
+// single-person thread, or a bare name for a group or an unknown number. An
+// exact number wins; otherwise the number is matched by MatchKey, as thread
+// names and row colours are, so a contact saved as 8165550182 is still found
+// for a thread addressed to +18165550182. The key is accepted only when it
+// names exactly one contact. Contacts synced from the phone count too: most
+// people are only there, and leaving them out left the thread with no contact,
+// which hid Contact theme from settings.
+func (m *Model) threadContact(t domain.Thread) contacts.Contact {
+	c := contacts.Contact{Name: t.DisplayName}
+	if len(t.Participants) != 1 {
+		return c
+	}
+	c.PhoneNumber = t.Participants[0].Number
+	key := contacts.MatchKey(c.PhoneNumber)
+	var byKey []contacts.Contact
+	for _, contact := range m.allContacts() {
+		if contact.PhoneNumber == c.PhoneNumber {
+			return contact
+		}
+		if key != "" && contacts.MatchKey(contact.PhoneNumber) == key {
+			byKey = append(byKey, contact)
+		}
+	}
+	if len(byKey) == 1 {
+		return byKey[0]
+	}
+	return c
+}
+
 func (m *Model) setFocus(on bool) {
 	m.focus = on
 	m.editor.Focus(on && !m.sending)
@@ -449,7 +530,19 @@ func (m *Model) saveConfig(c config.Config) tea.Cmd {
 	path := m.configPath
 	return func() tea.Msg { return configMsg{c, config.Save(path, c)} }
 }
+
+// applyConfig brings the parts of the model that cache configuration in line
+// with m.cfg, whether it was just saved or is a draft in the settings panel.
+func (m *Model) applyConfig() {
+	m.editor.SetMode(m.cfg.Composer.Mode)
+	m.assistant = buildAssistant(m.cfg)
+}
+
 func (m *Model) quit() tea.Cmd {
+	if m.hold != nil {
+		m.notify("Esc to undo or Enter to send now before quitting", true)
+		return nil
+	}
 	if m.sending {
 		m.notify("Wait for the current send to finish before quitting", true)
 		return nil
@@ -528,6 +621,8 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.leaveComposer()
 		}
 		return m, m.updateEditor(v.msg)
+	case holdTickMsg:
+		return m, m.holdTick(v)
 	case aiResultMsg:
 		m.handleAIResult(v)
 		return m, nil
@@ -591,6 +686,8 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case attachmentFetchedMsg:
 		return m, m.applyFetchedAttachment(v)
+	case attachmentConvertedMsg:
+		return m, m.applyConverted(v)
 	case attachmentSavedMsg:
 		if v.err != nil {
 			m.notify("Could not save the file", true)
@@ -698,8 +795,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			if d := v.cfg.KDEConnect.PreferredDevice; d != "" {
 				m.deviceID = d
 			}
-			m.editor.SetMode(v.cfg.Composer.Mode)
-			m.assistant = buildAssistant(v.cfg)
+			m.applyConfig()
 			if oldDevice != m.deviceID && m.history.enabled {
 				m.history.active = nil
 				m.history.view = conversation.New()
@@ -751,14 +847,17 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			if m.history.active != nil && m.recipient.PhoneNumber == v.contact.PhoneNumber {
 				m.recipient = *v.contact
 				m.layoutConversation()
-			} else {
+			} else if !v.restyle {
 				m.choose(*v.contact)
 			}
 		}
 		sort.SliceStable(m.contacts, func(i, j int) bool { return strings.ToLower(m.contacts[i].Name) < strings.ToLower(m.contacts[j].Name) })
 		m.selected = max(0, min(m.selected, len(m.filtered())-1))
-		m.modal = ""
-		m.notify("Contact saved", false)
+		// Ctrl+S in settings saves a contact theme and leaves the panel open.
+		if !v.restyle || (m.modal != "settings" && m.modal != "details") {
+			m.modal = ""
+			m.notify("Contact saved", false)
+		}
 		return m, nil
 	case sentMsg:
 		m.sending = false
@@ -804,6 +903,20 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal != "" {
 			return m, m.modalKey(v)
 		}
+		// Inside the undo window Esc takes the message back from any pane, and
+		// the send keys skip the wait. Everything else carries on as usual.
+		if m.hold != nil {
+			switch v.String() {
+			case "esc", "alt+esc", "ctrl+z":
+				return m, m.cancelHold()
+			case "ctrl+enter", "f12":
+				return m, m.releaseHold()
+			case "enter":
+				if m.focus {
+					return m, m.releaseHold()
+				}
+			}
+		}
 		if m.searching {
 			return m, m.searchKey(v)
 		}
@@ -830,6 +943,12 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		// control.
 		if v.String() == "ctrl+o" {
 			return m, m.openSettings()
+		}
+		// The open conversation's details, reachable while typing for the same
+		// reason; Ctrl+D would have been the obvious chord, but it already
+		// scrolls and deletes forward in the composer.
+		if v.String() == "ctrl+l" {
+			return m, m.openDetails()
 		}
 		// Enter submits from the composer (below); Ctrl+Enter and F12 are the
 		// explicit keys that work from any pane and whatever the terminal

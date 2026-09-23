@@ -127,7 +127,8 @@ func TestChangingProviderClearsTheEndpoint(t *testing.T) {
 	selectSetting(t, m, "Provider")
 	m.localProviderStatus[ai.ProviderLMStudio] = localProviderStatus{endpoint: ai.ProviderLMStudio.DefaultEndpoint(), available: true}
 	m.aiProviderCursor = providerIndex(string(ai.ProviderLMStudio))
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	d.settle("switched", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderLMStudio) })
 
 	if m.cfg.AI.Endpoint != "" {
@@ -149,7 +150,8 @@ func TestDisabledProviderTurnsAIOff(t *testing.T) {
 	d.run(m.action("Open settings"))
 	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex(string(ai.ProviderDisabled))
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	d.settle("off", func() bool { return !m.busy && !m.cfg.AI.Enabled })
 }
 
@@ -173,6 +175,7 @@ func TestAPIKeyIsEditedMaskedAndNeverShown(t *testing.T) {
 		t.Fatal("the key was rendered while being typed")
 	}
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	d.settle("saved", func() bool { return !m.busy && m.cfg.AI.APIKey == secret })
 
 	if m.settingEdit {
@@ -385,7 +388,8 @@ func TestFailedListingIsNotRetried(t *testing.T) {
 	selectSetting(t, m, "Provider")
 	m.localProviderStatus[ai.ProviderLMStudio] = localProviderStatus{endpoint: ai.ProviderLMStudio.DefaultEndpoint(), available: true}
 	m.aiProviderCursor = providerIndex(string(ai.ProviderLMStudio))
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	d.settle("switched", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderLMStudio) })
 	if m.modelListFailed != "" {
 		t.Error("changing provider kept the old refusal")
@@ -431,6 +435,7 @@ func TestAIEnableIndependentOfProviderAvailability(t *testing.T) {
 			if f, _ := m.selectedSetting(); f.id != settingAIEnabled {
 				t.Fatal("toggle moved focus")
 			}
+			d.press("ctrl+s")
 			saved, err := config.Load(m.configPath)
 			if err != nil || !saved.AI.Enabled {
 				t.Fatalf("enable did not survive reload: %v", err)
@@ -449,13 +454,16 @@ func TestUnavailableOllamaCannotBeSelected(t *testing.T) {
 	if !strings.Contains(m.settingsValue(settingAIProvider, true), "unavailable") {
 		t.Fatal("offline provider not marked")
 	}
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	if m.cfg.AI.Provider == "ollama" {
-		t.Fatal("offline provider selected")
+	// Cycling may pass through it, but it cannot be saved.
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
+	if saved, _ := config.Load(m.configPath); saved.AI.Provider == "ollama" {
+		t.Fatal("offline provider saved")
 	}
 	m.aiProviderCursor = providerIndex("openai")
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	if m.cfg.AI.Provider != "openai" {
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
+	if saved, _ := config.Load(m.configPath); saved.AI.Provider != "openai" {
 		t.Fatal("offline Ollama blocked another provider")
 	}
 }
@@ -494,6 +502,7 @@ func TestAPIKeyPrecedesAndPopulatesModel(t *testing.T) {
 		t.Fatalf("models not populated: %q %v", m.modal, m.choices)
 	}
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	saved, err := config.Load(m.configPath)
 	if err != nil || saved.AI.Model != "test-model" {
 		t.Fatalf("model not saved: %v", err)
@@ -556,7 +565,8 @@ func TestOllamaCustomEndpointSurvivesProviderSwitch(t *testing.T) {
 	}
 	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex("ollama")
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	if m.cfg.AI.Endpoint != endpoint {
 		t.Fatal("provider selection lost custom endpoint")
 	}
@@ -568,7 +578,8 @@ func TestOllamaCustomEndpointSurvivesProviderSwitch(t *testing.T) {
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEsc}))
 	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex("deepseek")
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	saved, err := config.Load(m.configPath)
 	if err != nil || saved.AI.OllamaEndpoint != endpoint || saved.AI.Endpoint != "" {
 		t.Fatalf("custom endpoint not retained separately: %v", err)
@@ -584,7 +595,8 @@ func TestSettingsRestoresEachProvidersCredentials(t *testing.T) {
 	d.run(m.action("Open settings"))
 	selectSetting(t, m, "Provider")
 	m.aiProviderCursor = providerIndex("openai")
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.settingsAdjust(0))
+	d.press("ctrl+s")
 	if m.cfg.AI.APIKey != "" {
 		t.Fatal("DeepSeek key leaked to OpenAI")
 	}
@@ -594,7 +606,8 @@ func TestSettingsRestoresEachProvidersCredentials(t *testing.T) {
 	d.run(m.saveConfig(c))
 	for _, provider := range []string{"deepseek", "openai", "deepseek"} {
 		m.aiProviderCursor = providerIndex(provider)
-		d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+		d.run(m.settingsAdjust(0))
+		d.press("ctrl+s")
 		saved, err := config.Load(m.configPath)
 		if err != nil || saved.AI.APIKey != provider+"-secret" || saved.AI.Model != provider+"-model" {
 			t.Fatal("provider credentials were not restored and saved")

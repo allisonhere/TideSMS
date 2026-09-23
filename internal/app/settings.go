@@ -1,26 +1,28 @@
 package app
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/allisonhere/tidesms/internal/ai"
+	"github.com/allisonhere/tidesms/internal/config"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// The static settings panel is a single non-scrolling list of fields. Each row
-// shows its current value and is changed in place: Enter toggles or cycles a
-// value, and the two theme rows cycle with the arrow keys so the palette
-// previews live before it is committed with Enter.
+// The settings panel is a list of fields edited as one draft. Enter and the
+// arrow keys change a row in place and the change previews at once, but nothing
+// is written until Ctrl+S saves the whole panel; Esc closes it and puts back
+// what was last saved.
 
 type settingID int
 
 const (
 	settingTheme settingID = iota
-	settingContactTheme
 	settingComposer
 	settingBubbles
 	settingCorners
@@ -35,7 +37,11 @@ const (
 	settingAIKey
 	settingAIPolicy
 	settingScheduler
+	settingUndoSend
 )
+
+// undoSendChoices are the undo windows the settings row cycles through.
+var undoSendChoices = []int{0, 3, 5, 10}
 
 // aiSettings are the rows that configure the writing assistant. They are the
 // only way to turn AI on from inside the app: the privacy pickers in the
@@ -72,13 +78,11 @@ type settingsGroup struct {
 	fields []settingsField
 }
 
-// settingsGroups is the panel's shape for the current context. Contact theme
-// only appears when a contact or open thread gives it a target.
+// settingsGroups is the panel's shape. It holds app-wide defaults only: a
+// conversation's own colours are set from its details screen (i or Ctrl+L),
+// where there is never any doubt about whose they are.
 func (m *Model) settingsGroups() []settingsGroup {
 	appearance := []settingsField{{settingTheme, "Theme"}}
-	if _, ok := m.settingsContact(); ok {
-		appearance = append(appearance, settingsField{settingContactTheme, "Contact theme"})
-	}
 	appearance = append(appearance,
 		settingsField{settingBubbles, "Message bubbles"},
 		settingsField{settingCorners, "Bubble corners"},
@@ -94,6 +98,7 @@ func (m *Model) settingsGroups() []settingsGroup {
 		}},
 		{"Assistant", aiSettings},
 		{"Sending", []settingsField{
+			{settingUndoSend, "Undo send"},
 			{settingScheduler, "Background sending"},
 		}},
 	}
@@ -136,15 +141,6 @@ func (m *Model) settingsLines() []settingsLine {
 	return out
 }
 
-// settingsContact resolves the contact whose theme the panel edits, mirroring
-// the palette's Change contact theme command.
-func (m *Model) settingsContact() (contacts.Contact, bool) {
-	if m.focus && (m.recipient.ID != "" || m.recipient.Synced) {
-		return m.recipient, true
-	}
-	return m.selectedContact()
-}
-
 func (m *Model) selectedSetting() (settingsField, bool) {
 	fields := m.settingsFields()
 	if len(fields) == 0 {
@@ -158,10 +154,6 @@ func (m *Model) openSettings() tea.Cmd {
 	m.modal = "settings"
 	m.choice = 0
 	m.themeCursor = themeIndex(m.cfg.General.Theme)
-	m.contactCursor = 0
-	if c, ok := m.settingsContact(); ok {
-		m.contactCursor = contactThemeIndex(c.Theme)
-	}
 	m.bubbleInCursor = contactThemeIndex(m.cfg.Conversation.IncomingTheme)
 	m.bubbleOutCursor = contactThemeIndex(m.cfg.Conversation.OutgoingTheme)
 	m.aiProviderCursor = providerIndex(m.cfg.AI.Provider)
@@ -171,7 +163,62 @@ func (m *Model) openSettings() tea.Cmd {
 	}
 	m.aiPolicyCursor = policyIndex(policy)
 	m.settingEdit = false
+	m.settingsSaved = m.cfg
 	return m.probeLocalProviders()
+}
+
+// stageConfig makes c the panel's draft: it takes effect everywhere at once so
+// it can be judged, but nothing is written until Ctrl+S.
+func (m *Model) stageConfig(c config.Config) tea.Cmd {
+	m.cfg = c
+	m.applyConfig()
+	m.layoutConversation()
+	// A key typed for a hosted provider is only useful with a model, so go
+	// straight on to choosing one, as saving the key used to.
+	if m.lookupAfterKey {
+		m.lookupAfterKey = false
+		m.selectSettingRow(settingAIModel)
+		return m.chooseAIModel()
+	}
+	return nil
+}
+
+// settingsDirty reports whether the panel holds anything Ctrl+S would write.
+func (m *Model) settingsDirty() bool {
+	return !reflect.DeepEqual(m.cfg, m.settingsSaved)
+}
+
+// saveSettings writes the draft. The panel stays open, so a run of changes can
+// be saved and then carried on from.
+func (m *Model) saveSettings() tea.Cmd {
+	if !m.settingsDirty() {
+		m.notify("No changes to save", false)
+		return nil
+	}
+	if provider := ai.Provider(m.cfg.AI.Provider); provider != ai.Provider(m.settingsSaved.AI.Provider) && m.localProviderUnavailable(provider) {
+		m.notify(string(provider)+" is unavailable; choose another provider", true)
+		return nil
+	}
+	cmd := m.saveConfig(m.cfg)
+	if cmd == nil {
+		return nil
+	}
+	m.settingsSaved = m.cfg
+	m.notify("Settings saved", false)
+	return cmd
+}
+
+// discardSettings closes the panel and puts back what was saved, so a draft
+// that was only being tried leaves nothing behind.
+func (m *Model) discardSettings() {
+	dirty := m.settingsDirty()
+	m.cfg = m.settingsSaved
+	m.applyConfig()
+	m.layoutConversation()
+	m.modal = ""
+	if dirty {
+		m.notify("Settings changes discarded", false)
+	}
 }
 
 func themeIndex(name string) int {
@@ -257,15 +304,6 @@ func (m *Model) settingsValue(id settingID, selected bool) string {
 			return themes.Names[m.themeCursor]
 		}
 		return m.cfg.General.Theme
-	case settingContactTheme:
-		if selected {
-			return contactThemeNames()[m.contactCursor]
-		}
-		c, _ := m.settingsContact()
-		if c.Theme == "" {
-			return "automatic"
-		}
-		return c.Theme
 	case settingComposer:
 		return m.cfg.Composer.Mode
 	case settingBubbles:
@@ -286,6 +324,11 @@ func (m *Model) settingsValue(id settingID, selected bool) string {
 		return bubbleName(m.cfg.Conversation.OutgoingTheme)
 	case settingInlineMedia:
 		return onOff(m.cfg.Conversation.InlineMedia)
+	case settingUndoSend:
+		if m.cfg.Composer.UndoSeconds == 0 {
+			return "off"
+		}
+		return strconv.Itoa(m.cfg.Composer.UndoSeconds) + "s"
 	case settingAIEnabled:
 		return onOff(m.cfg.AI.Enabled)
 	case settingAIProvider:
@@ -329,105 +372,100 @@ func bubbleName(name string) string {
 	return name
 }
 
-// settingsAdjust handles ←/→: only the theme rows have a value worth cycling
-// without committing.
-func (m *Model) settingsAdjust(delta int) {
+// bubbleSwatch draws a bubble row's value on the fill and text that bubble would
+// use, so cycling the row shows the colour rather than only its name. It asks
+// BubbleFor, as the conversation does, so "automatic" shows the derived surface
+// and a theme too faint against the pane shows the fallback it would really get.
+func (m *Model) bubbleSwatch(value string, outgoing bool) string {
+	name := value
+	if name == "automatic" {
+		name = ""
+	}
+	b := themes.BubbleFor(themes.Base(m.cfg.General.Theme), name, outgoing)
+	if b.Fill == "" {
+		return value
+	}
+	return lipgloss.NewStyle().Background(b.Fill).Foreground(b.Text).Render(" " + value + " ")
+}
+
+// settingsAdjust handles ←/→: it changes the row's value in the draft, which
+// previews at once. Nothing is written until Ctrl+S. The contact theme is kept
+// as a cursor rather than staged, because it lives on the contact and not in
+// the configuration.
+func (m *Model) settingsAdjust(delta int) tea.Cmd {
 	f, ok := m.selectedSetting()
 	if !ok {
-		return
+		return nil
 	}
+	c := m.cfg
 	switch f.id {
 	case settingTheme:
 		m.themeCursor = cycleIndex(m.themeCursor, delta, len(themes.Names))
-	case settingContactTheme:
-		m.contactCursor = cycleIndex(m.contactCursor, delta, len(contactThemeNames()))
+		c.General.Theme = themes.Names[m.themeCursor]
 	case settingBubbleIn:
 		m.bubbleInCursor = cycleIndex(m.bubbleInCursor, delta, len(contactThemeNames()))
+		c.Conversation.IncomingTheme = globalBubbleTheme(contactThemeNames()[m.bubbleInCursor])
 	case settingBubbleOut:
 		m.bubbleOutCursor = cycleIndex(m.bubbleOutCursor, delta, len(contactThemeNames()))
+		c.Conversation.OutgoingTheme = globalBubbleTheme(contactThemeNames()[m.bubbleOutCursor])
 	case settingAIProvider:
+		// An unavailable provider may be passed through while cycling; the
+		// panel says so, and Ctrl+S refuses to save it.
 		m.aiProviderCursor = cycleIndex(m.aiProviderCursor, delta, len(ai.Providers))
+		c = c.SwitchAIProvider(string(ai.Providers[m.aiProviderCursor]))
+		m.modelListFailed = ""
+		if ai.Provider(c.AI.Provider) == ai.ProviderDisabled {
+			c.AI.Enabled = false
+		}
 	case settingAIPolicy:
 		m.aiPolicyCursor = cycleIndex(m.aiPolicyCursor, delta, len(globalPolicyChoices))
+		c.AI.DefaultPolicy = globalPolicyChoices[m.aiPolicyCursor]
+	case settingComposer:
+		if c.Composer.Mode == "vim" {
+			c.Composer.Mode = "normal"
+		} else {
+			c.Composer.Mode = "vim"
+		}
+	case settingBubbles:
+		c.Conversation.Bubbles = !c.Conversation.Bubbles
+	case settingCorners:
+		if c.Conversation.Corners == "square" {
+			c.Conversation.Corners = "round"
+		} else {
+			c.Conversation.Corners = "square"
+		}
+	case settingFill:
+		c.Conversation.FillBubbles = !c.Conversation.FillBubbles
+	case settingInlineMedia:
+		c.Conversation.InlineMedia = !c.Conversation.InlineMedia
+	case settingScheduler:
+		c.Scheduler.Enabled = !c.Scheduler.Enabled
+	case settingUndoSend:
+		// A value typed into the file that is not a choice starts from off.
+		i := 0
+		for j, v := range undoSendChoices {
+			if v == c.Composer.UndoSeconds {
+				i = j
+			}
+		}
+		c.Composer.UndoSeconds = undoSendChoices[cycleIndex(i, delta, len(undoSendChoices))]
+	case settingAIEnabled:
+		c.AI.Enabled = !c.AI.Enabled
+	default:
+		return nil
 	}
+	return m.stageConfig(c)
 }
 
-// settingsActivate handles Enter/Space: commit a theme, toggle a boolean, or
-// cycle a two-valued enum, always saving immediately except for themes which
-// are already previewed.
+// settingsActivate handles Enter/Space. A row with a value changes it as →
+// does; the typed rows open their editor, and the model row its picker. Enter
+// never saves: that is Ctrl+S, for the whole panel at once.
 func (m *Model) settingsActivate() tea.Cmd {
 	f, ok := m.selectedSetting()
 	if !ok {
 		return nil
 	}
 	switch f.id {
-	case settingTheme:
-		c := m.cfg
-		c.General.Theme = themes.Names[m.themeCursor]
-		return m.saveConfig(c)
-	case settingContactTheme:
-		return m.commitContactTheme(contactThemeNames()[m.contactCursor])
-	case settingComposer:
-		c := m.cfg
-		if c.Composer.Mode == "vim" {
-			c.Composer.Mode = "normal"
-		} else {
-			c.Composer.Mode = "vim"
-		}
-		return m.saveConfig(c)
-	case settingBubbles:
-		c := m.cfg
-		c.Conversation.Bubbles = !c.Conversation.Bubbles
-		return m.saveConfig(c)
-	case settingCorners:
-		c := m.cfg
-		if c.Conversation.Corners == "square" {
-			c.Conversation.Corners = "round"
-		} else {
-			c.Conversation.Corners = "square"
-		}
-		return m.saveConfig(c)
-	case settingFill:
-		c := m.cfg
-		c.Conversation.FillBubbles = !c.Conversation.FillBubbles
-		return m.saveConfig(c)
-	case settingBubbleIn:
-		c := m.cfg
-		c.Conversation.IncomingTheme = globalBubbleTheme(contactThemeNames()[m.bubbleInCursor])
-		return m.saveConfig(c)
-	case settingBubbleOut:
-		c := m.cfg
-		c.Conversation.OutgoingTheme = globalBubbleTheme(contactThemeNames()[m.bubbleOutCursor])
-		return m.saveConfig(c)
-	case settingInlineMedia:
-		c := m.cfg
-		c.Conversation.InlineMedia = !c.Conversation.InlineMedia
-		return m.saveConfig(c)
-	case settingScheduler:
-		c := m.cfg
-		c.Scheduler.Enabled = !c.Scheduler.Enabled
-		return m.saveConfig(c)
-	case settingAIEnabled:
-		c := m.cfg
-		c.AI.Enabled = !c.AI.Enabled
-		return m.saveConfig(c)
-	case settingAIProvider:
-		c := m.cfg
-		provider := ai.Providers[m.aiProviderCursor]
-		if m.localProviderUnavailable(provider) {
-			m.notify(string(provider)+" is unavailable; choose another provider", true)
-			return nil
-		}
-		c = c.SwitchAIProvider(string(provider))
-		m.modelListFailed = ""
-		if ai.Provider(c.AI.Provider) == ai.ProviderDisabled {
-			c.AI.Enabled = false
-		}
-		return m.saveConfig(c)
-	case settingAIPolicy:
-		c := m.cfg
-		c.AI.DefaultPolicy = globalPolicyChoices[m.aiPolicyCursor]
-		return m.saveConfig(c)
 	case settingAIModel:
 		// Offer what the provider actually serves; typing stays available
 		// behind the picker's own entry, and as the fallback when the provider
@@ -436,7 +474,7 @@ func (m *Model) settingsActivate() tea.Cmd {
 	case settingAIEndpoint, settingAIKey:
 		return m.beginSettingEdit(f.id)
 	}
-	return nil
+	return m.settingsAdjust(1)
 }
 
 // globalBubbleTheme maps the picker's "automatic" to an empty config value.
@@ -516,29 +554,7 @@ func (m *Model) commitBubbleTheme(name string) tea.Cmd {
 		local.ThemeIn = name
 	}
 	m.busy = true
-	return func() tea.Msg { return mutationMsg{contact: &local, err: m.store.SaveContact(local)} }
-}
-
-// commitContactTheme applies a contact accent, promoting a phone entry to a
-// local contact first, exactly as the palette picker does.
-func (m *Model) commitContactTheme(name string) tea.Cmd {
-	c, ok := m.settingsContact()
-	if !ok {
-		m.notify("Select a saved contact first", true)
-		return nil
-	}
-	local, err := ensureLocal(c)
-	if err != nil {
-		m.notify("Could not create contact ID", true)
-		return nil
-	}
-	if name == "automatic" {
-		local.Theme = ""
-	} else {
-		local.Theme = name
-	}
-	m.busy = true
-	return func() tea.Msg { return mutationMsg{contact: &local, err: m.store.SaveContact(local)} }
+	return func() tea.Msg { return mutationMsg{contact: &local, err: m.store.SaveContact(local), restyle: true} }
 }
 
 // settingsThemePreview returns the global theme highlighted in the panel for
@@ -592,16 +608,13 @@ func (m *Model) pendingContactTheme() (contacts.Contact, string, bool) {
 			return contacts.Contact{}, "", false
 		}
 		return m.editing, blankAutomatic(m.choices[m.choice]), true
-	case "settings":
-		f, ok := m.selectedSetting()
-		if !ok || f.id != settingContactTheme {
+	case "details":
+		// A group's colours are its thread's, not any member's.
+		if m.details.group {
 			return contacts.Contact{}, "", false
 		}
-		c, ok := m.settingsContact()
-		if !ok {
-			return contacts.Contact{}, "", false
-		}
-		return c, blankAutomatic(contactThemeNames()[m.contactCursor]), true
+		name, _ := m.detailsPreview(detailsTheme)
+		return m.recipient, name, true
 	}
 	return contacts.Contact{}, "", false
 }
@@ -613,25 +626,6 @@ func blankAutomatic(name string) string {
 		return ""
 	}
 	return name
-}
-
-// settingsContactPreview returns the contact theme highlighted in the panel,
-// with "automatic" resolving to no override.
-//
-// It previews onto the open conversation only when the contact being edited is
-// that conversation's own. The panel edits whichever contact is selected, which
-// need not be the one on screen: cycling one person's theme used to repaint a
-// different person's conversation, showing a colour that would never be applied
-// to it.
-func (m *Model) settingsContactPreview() (string, bool) {
-	if m.modal != "settings" {
-		return "", false
-	}
-	c, name, ok := m.pendingContactTheme()
-	if !ok || !sameContact(c, m.recipient) {
-		return "", false
-	}
-	return name, true
 }
 
 // sameContact reports whether two records name the same person. Numbers
@@ -726,7 +720,7 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 	default:
 		return nil
 	}
-	return m.saveConfig(c)
+	return m.stageConfig(c)
 }
 
 func (m *Model) cancelSettingEdit() {
@@ -772,14 +766,18 @@ func (m *Model) settingsEditKey(k tea.KeyMsg) tea.Cmd {
 func (m *Model) settingsHint() string {
 	if m.settingEdit {
 		if m.settingEditing == settingAIKey {
-			return "Enter save · Esc cancel · the key is never shown"
+			return "Enter done · Esc cancel · the key is never shown"
 		}
-		return "Enter save · Tab/↑↓ leave field · Esc cancel"
+		return "Enter done · Tab/↑↓ leave field · Esc cancel"
+	}
+	esc := "Esc close"
+	if m.settingsDirty() {
+		esc = "Esc discard"
 	}
 	if f, ok := m.selectedSetting(); ok && textSetting(f.id) {
-		return "↑↓ move · Enter edit · Esc close"
+		return "↑↓ move · Enter edit · Ctrl+S save · " + esc
 	}
-	return "↑↓ move · ←→ change · Enter toggle · Esc close"
+	return "↑↓ move · ←→/Enter change · Ctrl+S save · " + esc
 }
 
 // aiSettingsNotice explains a configuration that cannot work, at the moment it

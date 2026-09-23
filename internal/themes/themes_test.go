@@ -6,9 +6,14 @@ import (
 	"testing"
 )
 
-// Every palette TideUI ships is offered, so a contact can be given any of them.
+// Every palette TideUI ships is offered, so a contact can be given any of them,
+// plus the Omarchy theme on a machine that has one.
 func TestNamesCoverTideUIThemes(t *testing.T) {
-	if len(Names) != len(tideui.BuiltinThemes) || len(Names) < 10 {
+	builtin := len(Names)
+	if len(Names) > 0 && Names[0] == Omarchy {
+		builtin--
+	}
+	if builtin != len(tideui.BuiltinThemes) || builtin < 10 {
 		t.Fatalf("offering %d of %d themes", len(Names), len(tideui.BuiltinThemes))
 	}
 	for _, name := range Names {

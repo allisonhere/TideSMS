@@ -9,6 +9,16 @@ import (
 	"strings"
 )
 
+// statusMode is the editing mode for the status bar: Vim's current mode while
+// the composer is being typed in, and nothing otherwise. Plain editing has no
+// modes to report.
+func (m *Model) statusMode(composing bool) string {
+	if !composing || m.cfg.Composer.Mode != "vim" {
+		return ""
+	}
+	return m.editor.Mode()
+}
+
 func (m *Model) historyView() string {
 	r := m.renderer()
 	// The conversation carries the contact's or thread's theme; the shell around
@@ -107,7 +117,7 @@ func (m *Model) historyView() string {
 		title += " · History"
 	}
 	rightPane := tideui.Pane{Title: title, Hint: h.view.Position(), Content: strings.Join(lines, "\n"), Focused: h.pane == paneConversation || h.pane == paneComposer, Accent: cr.Styles.Theme.BorderFocus}
-	status := components.Status(m.currentDevice(), r.Styles.Theme.Name, m.editor.Mode(), m.outboxSuffix())
+	status := components.Status(m.currentDevice(), r.Styles.Theme.Name, m.statusMode(h.pane == paneComposer), m.outboxSuffix())
 	status.Left += " | " + h.status
 	if d := m.currentDevice(); d != nil && !d.Connected {
 		status.Left = "KDE Connect ○ " + d.Name + " | Offline"
@@ -119,7 +129,7 @@ func (m *Model) historyView() string {
 		// Contacts share the sidebar with threads rather than holding a column of
 		// their own: threads already carry resolved names, so the list is only
 		// wanted when it is being used, and the conversation gets the width.
-		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts · , settings", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
+		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts · , settings", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes, m.threadDrafts()), Focused: h.pane == paneThreads}
 		if m.sidebarPane() == paneContacts {
 			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: h.pane == paneContacts}
 		}
@@ -133,7 +143,7 @@ func (m *Model) historyView() string {
 		case paneContacts:
 			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, m.width-2), body, m.query, m.searching), Focused: true}
 		case paneThreads:
-			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body, threadThemes), Focused: true}
+			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body, threadThemes, m.threadDrafts()), Focused: true}
 		}
 		// TideUI's Tabbed mode reserves a compact header and shows the active pane.
 		layout.Mode = tideui.Tabbed

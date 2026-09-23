@@ -16,6 +16,11 @@ import (
 // the graphics escape. Kitty and iTerm2 get the real image; anything else gets
 // a large braille rendering so the feature still works without graphics.
 func runImageViewer(path string) error {
+	// The app hands over a drawable copy, but a photo in a format Go cannot
+	// decode (HEIC) is converted here too rather than failing with a flash.
+	if p, err := media.Convert(path); err == nil {
+		path = p
+	}
 	fd := int(os.Stdout.Fd())
 	cols, rows, err := term.GetSize(fd)
 	if err != nil || cols <= 0 || rows <= 0 {

@@ -3,6 +3,18 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## Undo send and message runs
+
+A sent message waits `[composer] undo_seconds` (default 4, **Settings → Undo send**) before leaving. The status line counts down; Esc takes it back with the draft intact and Enter sends at once. Quitting inside the window is refused. An offline phone skips the window and goes straight to the queue prompt.
+
+Consecutive messages from one sender within five minutes share one header and sit without gaps. One-to-one incoming headers show only the time. Only the newest outgoing message shows a settled status. A message's shape is part of the layout cache key, so a cached message is redrawn when a new neighbour changes it.
+
+Fixed: the composer placeholder lost its first letter (Ripple draws the cursor in place of it) and showed a cursor before the composer was focused; the status bar showed `INSERT` in plain editing mode and while other panes were focused, and now shows Vim's mode only while composing; selecting the last settings row in a short window scrolled it out of view.
+
+Thread rows keep their time beside the unread count (`2 · 13:40`), show **Draft:** and the unsent text for any thread but the one being typed in, and preview a media-only message by its kind (`Photo`, `Video`, `2 attachments`) through `Message.Preview`. Rows cached before this with no text show `Attachment` until their next message. Verified in the real binary against the live phone.
+
+Not yet verified by hand: a real send through the undo window.
+
 ## Keyboard pane navigation
 
 Enter opens a thread ready to compose. Tab/Shift+Tab toggle the remembered sidebar and draft; Alt+1/2/3 focus threads/history/composer. Escape steps back through history to threads, with search/dialog dismissal first and Vim mode handling preserved. Read-only groups toggle sidebar/history. Existing headers and separators identify the focused area without extra rows.

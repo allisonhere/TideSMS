@@ -10,8 +10,14 @@ import (
 // a full set of colors rather than an accent alone.
 var Names = builtinNames()
 
+// "omarchy" leads the list on a machine running Omarchy, where matching the
+// desktop is the likeliest wish; elsewhere it is not offered, though a config
+// that names it still loads.
 func builtinNames() []string {
-	out := make([]string, 0, len(tideui.BuiltinThemes))
+	out := make([]string, 0, len(tideui.BuiltinThemes)+1)
+	if OmarchyAvailable() {
+		out = append(out, Omarchy)
+	}
 	for _, t := range tideui.BuiltinThemes {
 		out = append(out, t.Name)
 	}
@@ -30,11 +36,26 @@ var legacy = map[string]lipgloss.Color{
 // the palette around them.
 var accents = []lipgloss.Color{"#89dceb", "#f5a3bb", "#89b4fa", "#cba6f7", "#f9c97b", "#a6e3bd"}
 
+// byName finds a full palette: the live Omarchy one, or one of TideUI's. An
+// "omarchy" that cannot be read falls back to the default palette, so it is
+// still reported as found.
+func byName(name string) (tideui.Theme, bool) {
+	if name == Omarchy {
+		if t, ok := omarchyTheme(); ok {
+			return t, true
+		}
+		t, _ := tideui.ThemeByName("catppuccin-mocha")
+		t.Name = Omarchy
+		return t, true
+	}
+	return tideui.ThemeByName(name)
+}
+
 func Valid(name string) bool {
 	if _, ok := legacy[name]; ok {
 		return true
 	}
-	_, ok := tideui.ThemeByName(name)
+	_, ok := byName(name)
 	return ok
 }
 
@@ -52,10 +73,10 @@ func accented(base tideui.Theme, name string, c lipgloss.Color) tideui.Theme {
 // Base returns the palette a theme name selects, treating a legacy accent name
 // as an accent over TideUI's default.
 func Base(name string) tideui.Theme {
-	if t, ok := tideui.ThemeByName(name); ok {
+	if t, ok := byName(name); ok {
 		return t
 	}
-	fallback, _ := tideui.ThemeByName("catppuccin-mocha")
+	fallback, _ := byName("catppuccin-mocha")
 	if c, ok := legacy[name]; ok {
 		return accented(fallback, name, c)
 	}
@@ -69,7 +90,7 @@ func Base(name string) tideui.Theme {
 func Resolve(global, override, identity string) tideui.Theme {
 	base := Base(global)
 	if override != "" {
-		if full, ok := tideui.ThemeByName(override); ok {
+		if full, ok := byName(override); ok {
 			return full
 		}
 		if c, ok := legacy[override]; ok {

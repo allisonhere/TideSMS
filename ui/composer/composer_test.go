@@ -2,6 +2,7 @@ package composer
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"strings"
@@ -72,5 +73,20 @@ func TestMarkersRenderUnderline(t *testing.T) {
 	m.ClearMarkers()
 	if strings.Contains(m.View(lipgloss.Color("#ff0000")), marked) {
 		t.Fatal("underline survived ClearMarkers")
+	}
+}
+
+// A new composer draws its hint whole and no cursor until the host focuses it;
+// once focused, the cursor sits on the hint's first letter instead of hiding it.
+func TestPlaceholderKeepsItsFirstLetter(t *testing.T) {
+	m := New("normal")
+	m.Size(40, 3)
+	plain := func() string { return ansi.Strip(m.View(lipgloss.Color("#ff0000"))) }
+	if v := plain(); !strings.Contains(v, "Write a message…") {
+		t.Fatalf("unfocused placeholder = %q", v)
+	}
+	m.Focus(true)
+	if v := plain(); !strings.Contains(v, "Write a message…") {
+		t.Fatalf("focused placeholder = %q", v)
 	}
 }

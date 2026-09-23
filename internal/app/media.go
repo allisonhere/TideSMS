@@ -149,8 +149,8 @@ func (m *Model) previewAttachment() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if path := localFile(a); path != "" {
-		return externalPreview(path)
+	if localFile(a) != "" {
+		return m.viewLocal(a)
 	}
 	if _, isAttachmentBackend := m.backend.(backend.AttachmentBackend); !isAttachmentBackend {
 		// No way to fetch the part, so the preview is all there is. Better a
@@ -215,6 +215,11 @@ func (m *Model) fetchAttachment() tea.Cmd {
 	m.notify("Downloading attachment…", false)
 	return func() tea.Msg {
 		path, err := b.FetchAttachment(ctx, device, partID, uid)
+		// Convert a photo the app cannot decode while still off the UI
+		// thread, so it can be drawn as soon as the download is reported.
+		if err == nil && media.NeedsConversion(path) {
+			_, _ = media.Convert(path)
+		}
 		return attachmentFetchedMsg{id: id, path: path, err: err}
 	}
 }
@@ -231,7 +236,7 @@ func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
 		if m.mediaAtts[i].ID == v.id {
 			m.mediaAtts[i].LocalPath = v.path
 			m.mediaAtts[i].State = domain.AttachmentAvailable
-			if w, h, ok := media.ImageSize(v.path); ok {
+			if w, h, ok := media.ImageSize(displayableOr(v.path)); ok {
 				m.mediaAtts[i].Width, m.mediaAtts[i].Height = w, h
 			}
 		}
@@ -251,10 +256,115 @@ func (m *Model) applyFetchedAttachment(v attachmentFetchedMsg) tea.Cmd {
 	}
 	// v asked for this file. Record the download first, then suspend for the
 	// viewer, so the write is not left racing a process that takes the terminal.
+	a, _ := m.currentAttachment()
+	a.LocalPath = v.path
+	view := m.viewLocal(a)
 	if record == nil {
-		return externalPreview(v.path)
+		return view
 	}
-	return tea.Sequence(record, externalPreview(v.path))
+	return tea.Sequence(record, view)
+}
+
+// displayableOr is the drawable copy of path, or path itself when there is
+// none, for callers that only read an image's size.
+func displayableOr(path string) string {
+	if p, ok := media.Displayable(path); ok {
+		return p
+	}
+	return path
+}
+
+// viewLocal opens a downloaded part full-screen. A photo in a format the app
+// cannot decode is shown from its converted copy, converting it first when
+// that has not happened yet. When it cannot be shown at all the preview is
+// shown instead, or the reason is given; the viewer is never started on a
+// file it cannot draw, which used to leave only a flash as it exited at once.
+func (m *Model) viewLocal(a domain.Attachment) tea.Cmd {
+	if p, ok := media.Displayable(a.LocalPath); ok {
+		return externalPreview(p)
+	}
+	if media.NeedsConversion(a.LocalPath) && !m.convertFailed[a.LocalPath] {
+		m.notify("Converting photo…", false)
+		return m.convertOne(a.ID, a.LocalPath, true)
+	}
+	return m.viewFallback(a)
+}
+
+// viewFallback shows the backend's preview of a part the app cannot draw.
+func (m *Model) viewFallback(a domain.Attachment) tea.Cmd {
+	if thumb := thumbFile(a); thumb != "" && media.Readable(thumb) {
+		m.notify("Can't display this photo's format; showing the preview", true)
+		return externalPreview(thumb)
+	}
+	// With nothing to draw, the viewer is where the file can still be opened
+	// in another app or saved.
+	if len(m.mediaAtts) > 0 {
+		m.modal = "media"
+	}
+	m.notify("Can't display this photo's format; o opens it in another app", true)
+	return nil
+}
+
+// attachmentConvertedMsg reports a photo converted to a format the app draws.
+type attachmentConvertedMsg struct {
+	id, path string
+	err      error
+	// view is set when v is waiting to show the result.
+	view bool
+}
+
+// convertOne converts one downloaded part in the background.
+func (m *Model) convertOne(id, path string, view bool) tea.Cmd {
+	if m.converting == nil {
+		m.converting = map[string]bool{}
+	}
+	m.converting[path] = true
+	return func() tea.Msg {
+		_, err := media.Convert(path)
+		return attachmentConvertedMsg{id: id, path: path, err: err, view: view}
+	}
+}
+
+// convertAttachments starts converting every downloaded part among msgs that
+// the app cannot draw and has not already tried.
+func (m *Model) convertAttachments(msgs []domain.Message) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, msg := range msgs {
+		for _, a := range msg.Attachments {
+			p := localFile(a)
+			if p == "" || m.converting[p] || m.convertFailed[p] || !media.NeedsConversion(p) {
+				continue
+			}
+			cmds = append(cmds, m.convertOne(a.ID, p, false))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// applyConverted redraws the conversation with a converted photo, and shows it
+// if v was waiting on it.
+func (m *Model) applyConverted(v attachmentConvertedMsg) tea.Cmd {
+	delete(m.converting, v.path)
+	if v.err != nil {
+		if m.convertFailed == nil {
+			m.convertFailed = map[string]bool{}
+		}
+		m.convertFailed[v.path] = true
+		m.logError("convert attachment", v.err)
+	}
+	m.layoutConversation()
+	if !v.view {
+		return nil
+	}
+	a, _ := m.currentAttachment()
+	if a.ID != v.id {
+		a = domain.Attachment{ID: v.id, LocalPath: v.path}
+	}
+	if p, ok := media.Displayable(v.path); ok {
+		m.notify("", false)
+		return externalPreview(p)
+	}
+	return m.viewFallback(a)
 }
 
 // mediaViewerLines is the text shown when no image is drawn.

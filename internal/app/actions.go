@@ -78,6 +78,8 @@ func (m *Model) navigation(k tea.KeyMsg) tea.Cmd {
 		}
 	case ",":
 		return m.openSettings()
+	case "i":
+		return m.openDetails()
 	case "?":
 		m.modal = "help"
 		m.choice = 0
@@ -207,12 +209,8 @@ func (m *Model) action(name string) tea.Cmd {
 	case "Sync phone contacts":
 		m.modal = ""
 		return m.syncContacts(true)
-	case "Edit contact", "Delete contact", "Change contact theme", "Change incoming bubble theme", "Change outgoing bubble theme", "Change AI policy", "Contact details":
-		c, ok := m.selectedContact()
-		if m.focus && (m.recipient.ID != "" || m.recipient.Synced) {
-			c = m.recipient
-			ok = true
-		}
+	case "Edit contact", "Delete contact", "Change contact theme", "Change incoming bubble theme", "Change outgoing bubble theme", "Change AI policy":
+		c, ok := m.targetContact()
 		if !ok {
 			m.notify("Select a saved contact first", true)
 			m.modal = ""
@@ -239,9 +237,10 @@ func (m *Model) action(name string) tea.Cmd {
 			m.openBubblePicker("contact", true)
 		case "Change AI policy":
 			m.openAIPolicyPicker(storage.ScopeContact)
-		case "Contact details":
-			m.openContactDetails()
 		}
+	case "Contact details":
+		m.modal = ""
+		return m.openDetails()
 	case "Switch device":
 		m.openDevices()
 	case "Toggle composer mode":
@@ -306,8 +305,8 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "search-all":
 		return m.globalSearchKey(k)
-	case "contact":
-		return m.contactDetailsKey(k)
+	case "details":
+		return m.detailsKey(k)
 	case "media":
 		return m.mediaKey(k)
 	case "settings":
@@ -316,6 +315,13 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		// claimed before the shared Esc below closes every modal.
 		if m.settingEdit {
 			return m.settingsEditKey(k)
+		}
+		switch k.String() {
+		case "ctrl+s":
+			return m.saveSettings()
+		case "esc":
+			m.discardSettings()
+			return nil
 		}
 	case "ai-models":
 		// The picker was opened from the panel, so Esc goes back to it rather
@@ -368,9 +374,9 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		case "end", "G":
 			m.choice = max(0, len(fields)-1)
 		case "left", "h":
-			m.settingsAdjust(-1)
+			return m.settingsAdjust(-1)
 		case "right", "l":
-			m.settingsAdjust(1)
+			return m.settingsAdjust(1)
 		case "enter", " ":
 			return m.settingsActivate()
 		}
@@ -485,7 +491,7 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 				c.Theme = ""
 			}
 			m.busy = true
-			return func() tea.Msg { return mutationMsg{contact: &c, err: m.store.SaveContact(c)} }
+			return func() tea.Msg { return mutationMsg{contact: &c, err: m.store.SaveContact(c), restyle: true} }
 		case "ai-models":
 			return m.commitAIModel(m.choices[m.choice])
 		case "bubble-themes":

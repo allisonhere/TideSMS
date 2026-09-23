@@ -499,3 +499,84 @@ func TestPlacedImageKeepsBubbleWidth(t *testing.T) {
 		}
 	}
 }
+
+// foreground is the truecolor SGR fragment a colour renders as text.
+func foreground(c lipgloss.Color) string {
+	return regexp.MustCompile(`38;2;\d+;\d+;\d+`).FindString(lipgloss.NewStyle().Foreground(c).Render("x"))
+}
+
+// glyphColour is the foreground in effect where a glyph is drawn: the last
+// foreground set before it on its line.
+func glyphColour(line, glyph string) string {
+	at := strings.Index(line, glyph)
+	if at < 0 {
+		return ""
+	}
+	all := regexp.MustCompile(`38;2;\d+;\d+;\d+`).FindAllString(line[:at], -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1]
+}
+
+// Choosing a bubble theme recolours the frame as well as the fill, whether or
+// not the bubble is filled. The frame used to keep the conversation's own
+// colour, because the glyphs were drawn in a style that set its own.
+func TestBubbleThemeColoursTheFrame(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	conv := themes.Resolve("tide", "", "")
+	in := themes.BubbleFor(conv, "dracula", false)
+	if in.Frame == "" {
+		t.Fatal("dracula gave no frame colour")
+	}
+	msgs := []domain.Message{message(domain.Incoming, "Are we still meeting around seven?")}
+	for _, fill := range []bool{true, false} {
+		lines := renderOpts(t, msgs, 60, 20, Options{Timestamps: "smart", Bubbles: true, Fill: fill, Incoming: in})
+		for _, glyph := range []string{"╭", "│", "╰"} {
+			var line string
+			for _, l := range lines {
+				if strings.Contains(l, glyph) {
+					line = l
+					break
+				}
+			}
+			if got, want := glyphColour(line, glyph), foreground(in.Frame); got != want {
+				t.Errorf("fill=%v: %s drawn in %q, want the bubble's frame %q", fill, glyph, got, want)
+			}
+		}
+	}
+}
+
+// A downloaded photo the app cannot decode (a HEIC, say, before it has been
+// converted) must not replace the preview that was showing. It used to, so
+// downloading a photo made its picture disappear.
+func TestUndecodablePartFallsBackToThePreview(t *testing.T) {
+	dir := t.TempDir()
+	thumb := filepath.Join(dir, "thumb.png")
+	img := image.NewRGBA(image.Rect(0, 0, 20, 20))
+	img.Set(5, 5, color.RGBA{255, 0, 0, 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(thumb, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	part := filepath.Join(dir, "PART_1")
+	if err := os.WriteFile(part, []byte("\x00\x00\x00\x18ftypheic not decodable here"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := domain.Attachment{ID: "a1", MIMEType: "image/heic", LocalPath: part, ThumbPath: thumb, State: domain.AttachmentAvailable}
+	if got := drawable(a); got != thumb {
+		t.Fatalf("drawable = %q, want the preview %q", got, thumb)
+	}
+	// Once a part is readable it is preferred to the preview.
+	a.LocalPath = thumb
+	a.ThumbPath = ""
+	if got := drawable(a); got != thumb {
+		t.Errorf("a readable part was not drawn: %q", got)
+	}
+}

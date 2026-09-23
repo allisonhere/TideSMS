@@ -99,7 +99,7 @@ func (m *Model) View() string {
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, right-2, "")
 	}
-	status := components.Status(m.currentDevice(), theme.Name, strings.ToUpper(m.cfg.Composer.Mode), m.outboxSuffix())
+	status := components.Status(m.currentDevice(), theme.Name, m.statusMode(m.focus), m.outboxSuffix())
 	layout := tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, SidebarRatio: 0.28, Status: &status, Panes: [3]tideui.Pane{{Title: "Contacts", Hint: "/ search", Content: list, Focused: !m.focus, Accent: theme.BorderFocus}, {Title: title, Content: strings.Join(lines, "\n"), Focused: m.focus, Accent: theme.BorderFocus}}}
 	if m.modal != "" {
 		overlay := m.renderModal(r)
@@ -172,10 +172,10 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			title = "Incoming bubble theme"
 		}
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
-	case "contact":
-		title = "Contact"
-		body = m.contactDetailsHeader() + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-18))
-		hint = "Enter run · Esc close"
+	case "details":
+		title = m.detailsTitle()
+		body = m.detailsBody(r, w-4) + "\n\n" + r.Styles.DetailMeta.Render(m.detailsHint())
+		hint = ""
 	case "delete-message":
 		title = "Delete local copy"
 		body = "Delete this cached copy?\nThe phone's own message is not touched, and a synced copy may\nreappear after the next sync.\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-16))
@@ -264,6 +264,9 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		body = components.Choices(r, m.choices, m.choice, w-4, m.height-12)
 	case "settings":
 		title = "Settings"
+		if m.settingsDirty() {
+			title = "Settings · unsaved"
+		}
 		lines := m.settingsLines()
 		idx := max(0, min(m.choice, len(m.settingsFields())-1))
 		// The panel grew past what a short window can hold, so it shows a slice
@@ -282,8 +285,9 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			first = min(max(0, cursor-visible/2), len(lines)-visible)
 			// Never open a window on a heading's row without the rows it
 			// titles being the reason; starting one line earlier keeps the
-			// heading with its group.
-			if first > 0 && lines[first].heading == "" && lines[first-1].heading != "" {
+			// heading with its group — unless that would push the selection
+			// off the bottom.
+			if first > 0 && lines[first].heading == "" && lines[first-1].heading != "" && cursor < first-1+visible {
 				first--
 			}
 		}
@@ -301,6 +305,8 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			suffix := m.settingsValue(line.field.id, line.index == idx)
 			if m.settingEdit && line.index == idx {
 				suffix = m.settingInput.View()
+			} else if id := line.field.id; id == settingBubbleIn || id == settingBubbleOut {
+				suffix = m.bubbleSwatch(suffix, id == settingBubbleOut)
 			}
 			if line.field.id == settingAIProvider && strings.Contains(suffix, "(unavailable)") {
 				suffix = r.Styles.DetailMeta.Render(suffix)
@@ -400,6 +406,7 @@ func historyHelp() []helpGroup {
 		}},
 		{"Everywhere", []string{
 			", or Ctrl+O    Settings",
+			"i or Ctrl+L    This conversation's details: colours, alerts",
 			"Ctrl+P         Commands: theme, unread, refresh, contact",
 			"Ctrl+F         Search all messages",
 			"?              This list        q  Quit from a navigation pane",
@@ -431,6 +438,7 @@ func composeHelp() []helpGroup {
 		}},
 		{"Everywhere", []string{
 			", or Ctrl+O    Settings",
+			"i or Ctrl+L    A conversation's details: colours, alerts",
 			"Ctrl+P         Commands",
 			"Ctrl+F         Search all messages",
 			"?              This list        q  Quit (saves drafts)",

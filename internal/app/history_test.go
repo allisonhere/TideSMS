@@ -116,6 +116,12 @@ func (d *driver) press(s string) {
 		k = tea.KeyMsg{Type: tea.KeyEsc}
 	case "tab":
 		k = tea.KeyMsg{Type: tea.KeyTab}
+	case "ctrl+s":
+		k = tea.KeyMsg{Type: tea.KeyCtrlS}
+	case "ctrl+l":
+		k = tea.KeyMsg{Type: tea.KeyCtrlL}
+	case "ctrl+d":
+		k = tea.KeyMsg{Type: tea.KeyCtrlD}
 	}
 	_, cmd := d.m.Update(k)
 	d.run(cmd)
@@ -202,7 +208,10 @@ func conversationFixture(t *testing.T) (*Model, *fake.Backend, *storage.Store, *
 func attach(t *testing.T, s *storage.Store, b *fake.Backend, dir string) (*Model, *notice) {
 	t.Helper()
 	n := &notice{}
-	m := New(context.Background(), s, b, config.Default(), filepath.Join(dir, "config.toml"),
+	cfg := config.Default()
+	// Sends leave at once here; the undo window has tests of its own.
+	cfg.Composer.UndoSeconds = 0
+	m := New(context.Background(), s, b, cfg, filepath.Join(dir, "config.toml"),
 		slog.New(slog.NewJSONHandler(io.Discard, nil)), nil)
 	m.notifier = n.show
 	m.loaded = true
@@ -513,37 +522,6 @@ func TestQuoteAndDeleteLocalCopy(t *testing.T) {
 		if msg.Body == target {
 			t.Fatal("deleted message still in the cache")
 		}
-	}
-}
-
-// The contact inspector summarises a person and reuses the existing actions;
-// muting from it is stored per contact.
-func TestContactDetailsMuteToggle(t *testing.T) {
-	m, _, st, d, _ := conversationFixture(t)
-	syncPhone(t, d)
-	if _, ok := m.contactForDetails(); !ok {
-		t.Fatal("no contact to inspect")
-	}
-	m.editing = m.contacts[0]
-	m.openContactDetails()
-	if m.modal != "contact" {
-		t.Fatalf("modal = %q", m.modal)
-	}
-	pickChoice(t, m, "Mute notifications")
-	if cmd := m.contactDetailsKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
-		cmd()
-	}
-	mode, ok, _ := st.NotificationMode(storage.ScopeContact, m.contacts[0].PhoneNumber)
-	if !ok || mode != notifMuted {
-		t.Fatalf("mute not stored: mode=%q ok=%v", mode, ok)
-	}
-	m.openContactDetails()
-	pickChoice(t, m, "Unmute notifications")
-	if cmd := m.contactDetailsKey(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
-		cmd()
-	}
-	if _, ok, _ := st.NotificationMode(storage.ScopeContact, m.contacts[0].PhoneNumber); ok {
-		t.Fatal("unmute did not clear the override")
 	}
 }
 
@@ -902,8 +880,9 @@ func TestEscapeFromNewComposeFallsBackToThreads(t *testing.T) {
 	}
 }
 
-// The settings panel is one static list: a theme preview neither saves nor
-// closes on Esc, Enter commits, and a boolean toggle leaves the panel open.
+// The settings panel is one draft: a change previews at once but nothing is
+// written until Ctrl+S, Esc puts back what was saved, and Enter changes a row
+// without saving it.
 func TestSettingsPanelIsStaticAndNonDestructive(t *testing.T) {
 	m, _, _, d, _ := conversationFixture(t)
 	syncPhone(t, d)
@@ -916,9 +895,12 @@ func TestSettingsPanelIsStaticAndNonDestructive(t *testing.T) {
 		t.Fatalf("first row should be Theme, got %+v", f)
 	}
 	before := m.cfg.General.Theme
-	m.settingsAdjust(1)
-	if m.cfg.General.Theme != before {
-		t.Fatal("cycling previewed by saving")
+	d.run(m.settingsAdjust(1))
+	if m.cfg.General.Theme == before {
+		t.Fatal("cycling did not preview")
+	}
+	if saved, _ := config.Load(m.configPath); saved.General.Theme != before {
+		t.Fatalf("cycling wrote the theme to disk: %q", saved.General.Theme)
 	}
 	d.press("esc")
 	if m.modal != "" || m.cfg.General.Theme != before {
@@ -926,20 +908,30 @@ func TestSettingsPanelIsStaticAndNonDestructive(t *testing.T) {
 	}
 
 	d.run(m.action("Open settings"))
-	m.settingsAdjust(1)
+	d.run(m.settingsAdjust(1))
 	want := themes.Names[m.themeCursor]
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	d.settle("theme saved", func() bool { return !m.busy && m.cfg.General.Theme == want })
-	if m.modal != "settings" {
-		t.Fatal("committing a theme closed the panel")
-	}
-
 	selectSetting(t, m, "Message bubbles")
 	was := m.cfg.Conversation.Bubbles
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	d.settle("bubbles saved", func() bool { return !m.busy && m.cfg.Conversation.Bubbles != was })
+	d.press("enter")
+	if m.cfg.Conversation.Bubbles == was || m.busy {
+		t.Fatal("Enter should change the row in the draft without saving")
+	}
+	if saved, _ := config.Load(m.configPath); saved.Conversation.Bubbles != was {
+		t.Fatal("Enter wrote the toggle to disk")
+	}
+	d.press("ctrl+s")
+	d.settle("saved", func() bool { return !m.busy })
 	if m.modal != "settings" {
-		t.Fatal("toggling a setting closed the panel")
+		t.Fatal("saving closed the panel")
+	}
+	saved, err := config.Load(m.configPath)
+	if err != nil || saved.General.Theme != want || saved.Conversation.Bubbles == was {
+		t.Fatalf("Ctrl+S did not save the whole draft: theme=%q bubbles=%v err=%v", saved.General.Theme, saved.Conversation.Bubbles, err)
+	}
+	// Once saved, Esc has nothing to put back.
+	d.press("esc")
+	if m.cfg.General.Theme != want {
+		t.Fatalf("Esc after saving reverted the theme to %q", m.cfg.General.Theme)
 	}
 }
 
@@ -960,7 +952,7 @@ func TestBubbleThemesFromSettingsAndPalette(t *testing.T) {
 	if pal := m.bubblePalette(m.conversationTheme(), false); pal.Name != "dracula" {
 		t.Fatalf("preview palette = %q", pal.Name)
 	}
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	d.settle("global bubble saved", func() bool { return !m.busy && m.cfg.Conversation.IncomingTheme == "dracula" })
 	saved, err := config.Load(m.configPath)
 	if err != nil || saved.Conversation.IncomingTheme != "dracula" {
@@ -994,34 +986,6 @@ func TestBubbleThemesFromSettingsAndPalette(t *testing.T) {
 	// The outgoing direction is untouched.
 	if pal := m.bubblePalette(m.conversationTheme(), true); pal.Name != "" {
 		t.Fatalf("outgoing direction changed: %q", pal.Name)
-	}
-}
-
-// Settings offers the open contact's theme directly, so the accent can be
-// changed without leaving the settings menu for the command palette.
-func TestContactThemeReachableFromSettings(t *testing.T) {
-	m, _, _, d, _ := conversationFixture(t)
-	syncPhone(t, d)
-	openThreadByID(t, d, amyThread)
-	d.run(m.action("Open settings"))
-	if m.modal != "settings" {
-		t.Fatalf("settings did not open: %q", m.modal)
-	}
-	selectSetting(t, m, "Contact theme")
-	// Cycle the inline value until it lands on nord, then commit.
-	for i := 0; i < len(contactThemeNames()) && m.settingsValue(settingContactTheme, true) != "nord"; i++ {
-		m.settingsAdjust(1)
-	}
-	if got := m.settingsValue(settingContactTheme, true); got != "nord" {
-		t.Fatalf("could not cycle to nord: %q", got)
-	}
-	if name := m.conversationRenderer().Styles.Theme.Name; name != "nord" {
-		t.Fatalf("contact theme did not preview: %q", name)
-	}
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	d.settle("saved contact", func() bool { return !m.busy })
-	if name := m.conversationRenderer().Styles.Theme.Name; name != "nord" {
-		t.Fatalf("contact accent not applied: %q", name)
 	}
 }
 
@@ -1087,9 +1051,24 @@ func TestComposerShowsNoModeLabel(t *testing.T) {
 	if strings.Contains(view, "· Ripple") {
 		t.Errorf("composer still labels the editor:\n%s", view)
 	}
-	if !strings.Contains(view, "INSERT") {
-		t.Error("editing mode disappeared from the status bar")
+	// Plain editing has no modes, so nothing is reported for it.
+	if strings.Contains(view, "INSERT") {
+		t.Error("plain editing reported a mode in the status bar")
 	}
+	// Vim's mode is reported while typing, and only then.
+	m.cfg.Composer.Mode = "vim"
+	m.applyConfig()
+	mode := m.editor.Mode()
+	if mode == "" || !strings.Contains(ansi.Strip(m.View()), mode) {
+		t.Errorf("Vim mode %q missing from the status bar", mode)
+	}
+	m.setPane(paneThreads)
+	if strings.Contains(ansi.Strip(m.View()), "| "+mode) {
+		t.Errorf("Vim mode %q shown with the thread list focused", mode)
+	}
+	m.cfg.Composer.Mode = "normal"
+	m.applyConfig()
+	m.setPane(paneComposer)
 	rows := m.history.view.Height
 
 	// A group still explains why it cannot be replied to, and pays a row for it.
@@ -1129,7 +1108,9 @@ func TestMessageBubblesToggleFromSettings(t *testing.T) {
 	}
 	selectSetting(t, m, "Message bubbles")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	d.settle("saved", func() bool { return !m.busy && !m.cfg.Conversation.Bubbles })
+	d.press("esc")
 	if frames() {
 		t.Fatal("frames survived the toggle")
 	}
@@ -1171,7 +1152,9 @@ func TestBubbleCornersToggleFromSettings(t *testing.T) {
 	d.run(m.action("Open settings"))
 	selectSetting(t, m, "Bubble corners")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	d.settle("square", func() bool { return !m.busy && m.cfg.Conversation.Corners == "square" })
+	d.press("esc")
 	if !drawn('┌') || drawn('╭') {
 		t.Fatal("corners did not become square")
 	}
@@ -1347,7 +1330,9 @@ func TestBubbleFillToggleFromSettings(t *testing.T) {
 	d.run(m.action("Open settings"))
 	selectSetting(t, m, "Bubble fill")
 	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.press("ctrl+s")
 	d.settle("unfilled", func() bool { return !m.busy && !m.cfg.Conversation.FillBubbles })
+	d.press("esc")
 	if filled() {
 		t.Error("fill survived the toggle")
 	}
