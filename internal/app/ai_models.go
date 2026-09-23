@@ -29,6 +29,12 @@ type aiModelsMsg struct {
 // authentication failure they would have to interpret.
 func (m *Model) chooseAIModel() tea.Cmd {
 	provider := ai.Provider(m.cfg.AI.Provider)
+	// A listing that has already failed for this exact configuration will fail
+	// the same way again, and re-attempting it on every Enter is what turned
+	// an unreachable provider into a loop between the row and its editor.
+	if m.modelListFailed != "" && m.modelListFailed == m.modelListKey() {
+		return m.beginSettingEdit(settingAIModel)
+	}
 	if provider == ai.ProviderDisabled {
 		m.notify("Choose a provider first", true)
 		m.selectSettingRow(settingAIProvider)
@@ -52,6 +58,7 @@ func (m *Model) chooseAIModel() tea.Cmd {
 	}
 
 	m.notify("Asking "+string(provider)+" for its models…", false)
+	m.modelListFailed = ""
 	ctx := m.ctx
 	rt := ai.Runtime{
 		Provider: provider,
@@ -73,10 +80,12 @@ func (m *Model) applyAIModels(v aiModelsMsg) tea.Cmd {
 		return nil
 	}
 	if v.err != nil || len(v.models) == 0 {
-		m.notify(modelListError(v.err)+" — type the model name instead", true)
+		m.modelListFailed = m.modelListKey()
+		m.notify(m.modelListReason(v.err), true)
 		m.selectSettingRow(settingAIModel)
 		return m.beginSettingEdit(settingAIModel)
 	}
+	m.modelListFailed = ""
 	// The picker borrows m.choice, which is also the panel's cursor, so the
 	// panel's own row is remembered and put back when the picker closes.
 	// Without that, leaving the picker drops the reader on whatever row the
@@ -109,6 +118,29 @@ func (m *Model) cancelModelPicker() {
 		m.enablingAI = false
 		m.notify("No model chosen, so AI stayed off", false)
 	}
+}
+
+// modelListKey identifies the configuration a listing was attempted with, so a
+// failure is forgotten the moment any of it changes and the provider is given
+// another chance.
+func (m *Model) modelListKey() string {
+	return m.cfg.AI.Provider + "\x00" + m.cfg.AI.Endpoint + "\x00" + m.cfg.AI.APIKey
+}
+
+// modelListReason says why the catalogue could not be had, in terms of the
+// thing to do about it. A local provider that is not running is the common
+// case and deserves better than a dial error: the endpoint is on this machine,
+// so "not running" is both the diagnosis and the fix.
+func (m *Model) modelListReason(err error) string {
+	provider := ai.Provider(m.cfg.AI.Provider)
+	endpoint := m.cfg.AI.Endpoint
+	if endpoint == "" {
+		endpoint = provider.DefaultEndpoint()
+	}
+	if provider.Local() && err != nil && strings.Contains(err.Error(), "connect") {
+		return string(provider) + " is not running at " + endpoint + " — start it, or type a model name below"
+	}
+	return modelListError(err) + " — type a model name below"
 }
 
 // modelListError turns a listing failure into something a status line can say.

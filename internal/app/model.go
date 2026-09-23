@@ -131,6 +131,9 @@ type Model struct {
 	// settingsRow is the panel's cursor while a picker opened from it borrows
 	// m.choice, so leaving the picker returns to the row it was opened from.
 	settingsRow int
+	// modelListFailed is the configuration a model listing last failed for, so
+	// the same doomed request is not made again on every Enter.
+	modelListFailed string
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry

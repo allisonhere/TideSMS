@@ -444,6 +444,9 @@ func (m *Model) settingsActivate() tea.Cmd {
 	case settingAIProvider:
 		c := m.cfg
 		c.AI.Provider = string(ai.Providers[m.aiProviderCursor])
+		// A different provider is a different question, so an earlier refusal
+		// no longer applies.
+		m.modelListFailed = ""
 		// An endpoint belongs to the provider that was chosen with it. Keeping
 		// one across a switch would point the new provider at the old one's
 		// address, so a default is restored instead.
@@ -732,6 +735,14 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 	}
 	value := strings.TrimSpace(m.settingInput.Value())
 	id := m.settingEditing
+	// Committing nothing where nothing is what is already stored achieves
+	// nothing, and closing the editor on it is what left the reader pressing
+	// Enter against a row that only reopened. The editor stays open and says
+	// what it wants; Esc is how you leave.
+	if id == settingAIModel && value == "" && m.cfg.AI.Model == "" {
+		m.notify("Type a model name and press Enter, or Esc to leave AI off", true)
+		return nil
+	}
 	m.settingEdit = false
 	c := m.cfg
 	switch id {

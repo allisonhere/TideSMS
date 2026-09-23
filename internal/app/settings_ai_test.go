@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -553,5 +554,130 @@ func TestModelPickerRestoresThePanelCursor(t *testing.T) {
 	}
 	if f, _ := m.selectedSetting(); f.id != settingAIModel {
 		t.Errorf("returned to %q, want the row the picker was opened from", f.label)
+	}
+}
+
+// The loop this guards: with the provider unreachable there is no list, and
+// pressing Enter on an empty editor closed it, put the cursor back on the model
+// row, and reopened the editor on the next Enter. The switch never moved and
+// nothing said what to do.
+func TestEmptyModelKeepsTheEditorOpen(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Model")
+	d.run(m.applyAIModels(aiModelsMsg{err: ai.ErrUnavailable}))
+	if !m.settingEdit {
+		t.Fatal("no editor opened")
+	}
+
+	for i := 0; i < 3; i++ {
+		d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+		if !m.settingEdit {
+			t.Fatalf("press %d closed the editor on an empty model", i+1)
+		}
+		if f, _ := m.selectedSetting(); f.id != settingAIModel {
+			t.Fatalf("press %d moved off the model row", i+1)
+		}
+	}
+	if !strings.Contains(m.notice, "Type a model name") {
+		t.Errorf("notice = %q, want it to say what the editor wants", m.notice)
+	}
+	// Esc is the way out, and it leaves AI off rather than half-configured.
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEsc}))
+	if m.settingEdit {
+		t.Error("Esc did not leave the editor")
+	}
+	if m.cfg.AI.Enabled {
+		t.Error("AI was switched on with no model")
+	}
+}
+
+// Clearing a model that exists is still meaningful, so an empty commit is only
+// refused when there is nothing to clear.
+func TestEmptyModelStillClearsAnExistingOne(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Model = "llama3.2"
+	c.AI.Enabled = true
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Model == "llama3.2" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Model")
+	d.run(m.beginSettingEdit(settingAIModel))
+	for range "llama3.2" {
+		m.modalKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("cleared", func() bool { return !m.busy && m.cfg.AI.Model == "" })
+
+	if m.settingEdit {
+		t.Error("clearing an existing model left the editor open")
+	}
+	if m.cfg.AI.Enabled {
+		t.Error("AI stayed on with no model, which config.Load refuses")
+	}
+}
+
+// A listing that has already failed for this configuration is not attempted
+// again on every Enter: that retry is what made the row and its editor bounce.
+func TestFailedListingIsNotRetried(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Endpoint = "http://127.0.0.1:1/v1"
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Model")
+	d.run(m.applyAIModels(aiModelsMsg{err: ai.ErrUnavailable}))
+	if m.modelListFailed == "" {
+		t.Fatal("the failure was not remembered")
+	}
+	m.cancelSettingEdit()
+
+	// Enter now goes straight to typing rather than repeating the request.
+	if cmd := m.chooseAIModel(); cmd == nil {
+		t.Fatal("no editor offered")
+	}
+	if !m.settingEdit {
+		t.Error("a known-failed provider was asked again instead of opening the editor")
+	}
+
+	// A different provider is a different question, so it gets a fresh chance.
+	m.cancelSettingEdit()
+	selectSetting(t, m, "Provider")
+	m.aiProviderCursor = providerIndex(string(ai.ProviderLMStudio))
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("switched", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderLMStudio) })
+	if m.modelListFailed != "" {
+		t.Error("changing provider kept the old refusal")
+	}
+}
+
+// A local provider that is not running is the common failure, and a dial error
+// is not what to do about it.
+func TestLocalProviderFailureNamesWhatToStart(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Provider == string(ai.ProviderOllama) })
+
+	reason := m.modelListReason(errors.New("Get \"http://127.0.0.1:11434/v1/models\": dial tcp: connect: connection refused"))
+	if !strings.Contains(reason, "ollama is not running") {
+		t.Errorf("reason = %q, want it to name the provider that is down", reason)
+	}
+	if !strings.Contains(reason, "11434") {
+		t.Errorf("reason = %q, want it to name the endpoint", reason)
+	}
+	if !strings.Contains(reason, "type a model name") {
+		t.Errorf("reason = %q, want it to give the way forward", reason)
 	}
 }
