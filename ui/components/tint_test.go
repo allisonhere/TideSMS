@@ -113,19 +113,40 @@ func TestThreadsTintFromTheSuppliedMap(t *testing.T) {
 	}
 	out := Threads(testRenderer(), ts, "t2", 30, 12, map[string]string{"t1": "nord"}, nil)
 	nord := themes.Base("nord")
-	name := lipgloss.NewStyle().Background(nord.BorderFocus).Foreground(nord.Bg).Bold(true).Render(" Amy ")
-	preview := lipgloss.NewStyle().Background(nord.Bg).Foreground(nord.Fg).Render(" hi ")
-	if !strings.Contains(out, name) {
-		t.Errorf("a themed thread's name was not drawn on its accent: %q", out)
+	// opener is the escape a style begins with, so a line can be checked for
+	// being painted in it from its very first cell.
+	opener := func(st lipgloss.Style) string {
+		r := st.Render("x")
+		return r[:strings.Index(r, "x")]
 	}
-	if !strings.Contains(out, preview) {
-		t.Errorf("a themed thread's preview was not drawn in its colours: %q", out)
+	name := opener(lipgloss.NewStyle().Background(nord.BorderFocus).Foreground(nord.Bg).Bold(true))
+	preview := opener(lipgloss.NewStyle().Background(nord.Bg).Foreground(nord.Fg))
+	// Both lines of a themed thread are bands the width of the pane.
+	check := func(out string, selected bool) {
+		t.Helper()
+		lines := strings.Split(out, "\n")
+		for i, want := range []string{name, preview} {
+			line := lines[i]
+			if !strings.HasPrefix(line, want) || strings.Count(line, "\x1b[0m") != 1 || !strings.HasSuffix(line, "\x1b[0m") {
+				t.Errorf("line %d is not one band in the theme's colours: %q", i, line)
+			}
+			plain := ansi.Strip(line)
+			if ansi.StringWidth(plain) != 30 {
+				t.Errorf("line %d is %d cells, want the pane's 30: %q", i, ansi.StringWidth(plain), plain)
+			}
+			if strings.HasPrefix(plain, "▸") != selected {
+				t.Errorf("line %d selection mark = %v, want %v: %q", i, !selected, selected, plain)
+			}
+		}
+		if !strings.Contains(ansi.Strip(lines[0]), "Amy") || !strings.Contains(ansi.Strip(lines[1]), "hi") {
+			t.Errorf("the themed thread lost its text:\n%s", ansi.Strip(out))
+		}
 	}
-	// The chip carries its own background and text, so it stays on the
-	// selected row, where a bare foreground tint would not.
-	if selected := Threads(testRenderer(), ts, "t1", 30, 12, map[string]string{"t1": "nord"}, nil); !strings.Contains(selected, name) {
-		t.Errorf("the selected themed row lost its chip: %q", selected)
-	}
+	check(out, false)
+	// The band carries its own background and text, so it stays on the
+	// selected entry, where a bare foreground tint would not; the selection
+	// is marked in the first column instead.
+	check(Threads(testRenderer(), ts, "t1", 30, 12, map[string]string{"t1": "nord"}, nil), true)
 	if !strings.Contains(ansi.Strip(out), "Family") {
 		t.Error("an unthemed thread stopped rendering")
 	}

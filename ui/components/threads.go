@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
 	"github.com/allisonhere/tidesms/internal/domain"
+	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/x/ansi"
 	"strings"
@@ -64,16 +65,30 @@ func Threads(r tideui.Renderer, ts []domain.Thread, selected string, w, h int, t
 		// Leave room for the marker, the suffix and a gap, so a long participant
 		// list is elided rather than butting up against the timestamp.
 		theme := themeFor[t.ID]
-		if theme == "" {
+		if theme == "" || !themes.Valid(theme) {
 			name := ansi.Truncate(contacts.SafeLabel(t.DisplayName), max(1, w-len(mark)-ansi.StringWidth(suffix)-2), "…")
 			rows = append(rows, r.RenderRow(tideui.Row{Prefix: mark, Text: name, Suffix: suffix, Selected: t.ID == selected}, w), "  "+styled(ansi.Truncate(preview, max(1, w-2), "…")), "")
 			continue
 		}
-		// A themed row pads its name and preview by a cell each side, so the
-		// colour reads as a chip rather than a highlight clipped to the glyphs.
-		name := " " + ansi.Truncate(contacts.SafeLabel(t.DisplayName), max(1, w-len(mark)-ansi.StringWidth(suffix)-4), "…") + " "
-		chipped := " " + ansi.Truncate(preview, max(1, w-4), "…") + " "
-		rows = append(rows, r.RenderRow(tideui.Row{Prefix: mark, Text: chip(name, theme, true), Suffix: suffix, Selected: t.ID == selected}, w), "  "+chip(chipped, theme, false), "")
+		// A themed thread is two bands the width of the pane: the name and
+		// time on the accent, the preview on the palette's own background, so
+		// the whole entry reads as that person's conversation. The bands hide
+		// the selection colour, so the selected entry is marked in the first
+		// column instead, beside the unread dot.
+		lead := " "
+		if t.ID == selected {
+			lead = "▸"
+		}
+		unread := " "
+		if t.UnreadCount > 0 {
+			unread = "●"
+		}
+		head := lead + unread + " "
+		room := max(1, w-ansi.StringWidth(head)-ansi.StringWidth(suffix)-2)
+		name := ansi.Truncate(contacts.SafeLabel(t.DisplayName), room, "…")
+		gap := strings.Repeat(" ", max(1, w-ansi.StringWidth(head+name+suffix)-1))
+		body := lead + "  " + ansi.Truncate(preview, max(1, w-4), "…")
+		rows = append(rows, band(head+name+gap+suffix, theme, true, w), band(body, theme, false, w), "")
 	}
 	for len(rows) < h-1 {
 		rows = append(rows, "")

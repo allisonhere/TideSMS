@@ -34,22 +34,25 @@ func tinted(text, theme string, selected bool) string {
 	return lipgloss.NewStyle().Foreground(accent).Render(text)
 }
 
-// chip paints text on a theme's own colours rather than tinting it against the
-// pane, so a thread row reads as that person's conversation at a glance. The
-// name sits on the accent, as TideUI draws its own headings, and the message
-// preview on the theme's background and text, as a small bubble would. Both
-// pairs come from one palette, so they are legible whatever the pane is, which
-// is why a chip is kept on the selected row where a bare tint is not.
-func chip(text, theme string, name bool) string {
-	if theme == "" || !themes.Valid(theme) {
-		return text
-	}
+// band paints a line the full width of the pane on a theme's own colours
+// rather than tinting it against the pane, so a thread entry reads as that
+// person's conversation at a glance. The name line sits on the accent, as
+// TideUI draws its own headings, and the message preview on the theme's
+// background and text, as a bubble would. Both pairs come from one palette, so
+// they are legible whatever the pane is, which is why a band is kept on the
+// selected entry where a bare tint is not. text is padded, or cut short, to
+// exactly w cells.
+func band(text, theme string, name bool, w int) string {
+	text = ansi.Truncate(text, w, "…")
+	return chipStyle(theme, name).Render(text + strings.Repeat(" ", max(0, w-ansi.StringWidth(text))))
+}
+
+func chipStyle(theme string, name bool) lipgloss.Style {
 	base := themes.Base(theme)
-	style := lipgloss.NewStyle().Background(base.Bg).Foreground(base.Fg)
 	if name {
-		style = lipgloss.NewStyle().Background(base.BorderFocus).Foreground(base.Bg).Bold(true)
+		return lipgloss.NewStyle().Background(base.BorderFocus).Foreground(base.Bg).Bold(true)
 	}
-	return style.Render(text)
+	return lipgloss.NewStyle().Background(base.Bg).Foreground(base.Fg)
 }
 
 func ContactList(r tideui.Renderer, items []contacts.Contact, selected int, active string, w, h int, query string, searching bool) string {
