@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/allisonhere/tidesms/internal/ai"
+	"github.com/allisonhere/tidesms/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -76,6 +77,11 @@ func (m *Model) applyAIModels(v aiModelsMsg) tea.Cmd {
 		m.selectSettingRow(settingAIModel)
 		return m.beginSettingEdit(settingAIModel)
 	}
+	// The picker borrows m.choice, which is also the panel's cursor, so the
+	// panel's own row is remembered and put back when the picker closes.
+	// Without that, leaving the picker drops the reader on whatever row the
+	// picker's cursor happened to line up with.
+	m.settingsRow = m.choice
 	m.modal = "ai-models"
 	m.choices = append(append([]string{}, v.models...), typeModelChoice)
 	m.choice = 0
@@ -85,6 +91,24 @@ func (m *Model) applyAIModels(v aiModelsMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// closeModelPicker returns to the panel with its cursor where it was left.
+func (m *Model) closeModelPicker() {
+	m.modal = "settings"
+	m.choice = m.settingsRow
+}
+
+// cancelModelPicker abandons the choice. An enable waiting on the model is
+// abandoned with it: leaving the picker means no model was chosen, and
+// switching AI on without one writes a configuration the loader refuses.
+func (m *Model) cancelModelPicker() {
+	m.closeModelPicker()
+	m.selectSettingRow(settingAIModel)
+	if m.enablingAI {
+		m.enablingAI = false
+		m.notify("No model chosen, so AI stayed off", false)
+	}
 }
 
 // modelListError turns a listing failure into something a status line can say.
@@ -105,13 +129,32 @@ func modelListError(err error) string {
 
 // commitAIModel stores the chosen model and returns to the panel. The escape
 // hatch opens the text editor rather than saving its own label.
+//
+// A model chosen on the way to enabling AI finishes that job here. Asking for
+// the model was only ever a detour: leaving the reader on the model row with
+// the switch still off sent them back into this picker on the next Enter, which
+// is a loop, not a prompt.
 func (m *Model) commitAIModel(choice string) tea.Cmd {
-	m.modal = "settings"
+	m.closeModelPicker()
 	m.selectSettingRow(settingAIModel)
 	if choice == typeModelChoice || choice == "" {
 		return m.beginSettingEdit(settingAIModel)
 	}
 	c := m.cfg
 	c.AI.Model = choice
-	return m.saveConfig(c)
+	return m.saveConfig(m.finishEnabling(c))
+}
+
+// finishEnabling switches AI on when a model was the only thing missing, and
+// puts the cursor back on the row the reader pressed Enter on so the change is
+// visible where they asked for it.
+func (m *Model) finishEnabling(c config.Config) config.Config {
+	if !m.enablingAI || c.AI.Model == "" {
+		return c
+	}
+	m.enablingAI = false
+	c.AI.Enabled = true
+	m.selectSettingRow(settingAIEnabled)
+	m.notify("AI on · "+c.AI.Provider+" · "+c.AI.Model, false)
+	return c
 }

@@ -424,6 +424,10 @@ func (m *Model) settingsActivate() tea.Cmd {
 		// rejects, so saving one here would lock the app out of its own config
 		// on the next start. Go and find the model instead of writing that.
 		if c.AI.Model == "" {
+			// The detour is remembered, so choosing a model finishes switching
+			// AI on rather than leaving the switch off and the reader on the
+			// model row, where Enter only reopens the picker.
+			m.enablingAI = true
 			m.notify("Choose a model first — an enabled provider needs one", true)
 			m.selectSettingRow(settingAIModel)
 			if !pickedProvider {
@@ -741,6 +745,11 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 			c.AI.Enabled = false
 			m.notify("AI switched off: an enabled provider needs a model", false)
 		}
+		if value == "" {
+			// Nothing was named, so there is no enable to finish.
+			m.enablingAI = false
+		}
+		c = m.finishEnabling(c)
 	case settingAIKey:
 		c.AI.APIKey = value
 	default:
@@ -749,7 +758,16 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 	return m.saveConfig(c)
 }
 
-func (m *Model) cancelSettingEdit() { m.settingEdit = false }
+func (m *Model) cancelSettingEdit() {
+	m.settingEdit = false
+	if m.enablingAI {
+		// The edit was the model an enable was waiting on; abandoning it
+		// abandons the enable rather than leaving it pending against a row the
+		// reader has walked away from.
+		m.enablingAI = false
+		m.notify("No model chosen, so AI stayed off", false)
+	}
+}
 
 // selectSettingRow moves the panel's cursor to a row by id, so a setting that
 // depends on another can send the reader straight to it.

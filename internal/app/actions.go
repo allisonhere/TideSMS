@@ -316,6 +316,13 @@ func (m *Model) modalKey(k tea.KeyMsg) tea.Cmd {
 		if m.settingEdit {
 			return m.settingsEditKey(k)
 		}
+	case "ai-models":
+		// The picker was opened from the panel, so Esc goes back to it rather
+		// than closing both and dropping the reader out of settings entirely.
+		if k.String() == "esc" {
+			m.cancelModelPicker()
+			return nil
+		}
 	}
 	if k.String() == "esc" {
 		m.modal = ""

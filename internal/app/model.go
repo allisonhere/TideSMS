@@ -125,6 +125,12 @@ type Model struct {
 	// pendingModelLookup defers a model listing until the configuration it
 	// depends on has been saved and applied.
 	pendingModelLookup bool
+	// enablingAI records that the reader asked to switch AI on and is only
+	// being asked for a model on the way, so choosing one finishes the job.
+	enablingAI bool
+	// settingsRow is the panel's cursor while a picker opened from it borrows
+	// m.choice, so leaving the picker returns to the row it was opened from.
+	settingsRow int
 	// pending is a composed message awaiting send, queue or schedule.
 	pending        *pendingSend
 	outboxEntries  []outboxEntry

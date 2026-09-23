@@ -80,10 +80,12 @@ func TestEnablingAIChoosesAModelFromTheProvider(t *testing.T) {
 	if m.modal != "settings" {
 		t.Errorf("the picker did not return to the panel: %q", m.modal)
 	}
-
-	selectSetting(t, m, "Enabled")
-	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
-	d.settle("enabled", func() bool { return !m.busy && m.cfg.AI.Enabled })
+	// Choosing the model finishes the enable: Enter was pressed on Enabled,
+	// and being asked for a model was only a detour on the way there. A second
+	// press would toggle it straight back off.
+	if !m.cfg.AI.Enabled {
+		t.Fatal("choosing the model did not finish switching AI on")
+	}
 
 	// The written config must load again: a panel that writes a file the app
 	// then refuses would lock the reader out of their own settings.
@@ -417,5 +419,139 @@ func TestSettingsPanelScrollsWhenItOutgrowsTheWindow(t *testing.T) {
 	// And the panel must still fit: every line of the frame within the window.
 	if lines := strings.Count(m.View(), "\n") + 1; lines > 24 {
 		t.Errorf("rendered %d lines into a 24-line window", lines)
+	}
+}
+
+// Switching AI on is one act, not two. Asking for a model is a detour on the
+// way; finishing it has to finish the job, or the reader is left on the model
+// row with the switch still off, where Enter only reopens the picker.
+func TestEnablingCompletesOnceTheModelIsChosen(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Endpoint = modelServer(t, "llama3.2")
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Enabled")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.modal != "ai-models" {
+		t.Fatalf("the picker did not open: %q", m.modal)
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("enabled", func() bool { return !m.busy && m.cfg.AI.Model != "" })
+
+	if !m.cfg.AI.Enabled {
+		t.Error("choosing a model did not finish switching AI on")
+	}
+	// The change is shown where it was asked for.
+	if f, _ := m.selectedSetting(); f.id != settingAIEnabled {
+		t.Errorf("cursor left on %q, want the row Enter was pressed on", f.label)
+	}
+	if m.modal != "settings" {
+		t.Errorf("modal = %q, want the panel", m.modal)
+	}
+	saved, err := config.Load(m.configPath)
+	if err != nil || !saved.AI.Enabled || saved.AI.Model == "" {
+		t.Fatalf("not persisted or not loadable: %+v %v", saved.AI, err)
+	}
+}
+
+// The typed fallback finishes the enable too, so an unreachable provider is
+// not a different outcome, only a different route.
+func TestEnablingCompletesFromTheTypedFallback(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Enabled")
+
+	cmd := m.modalKey(tea.KeyMsg{Type: tea.KeyEnter})
+	d.run(cmd)
+	d.settle("provider", func() bool { return !m.busy })
+	d.run(m.applyAIModels(aiModelsMsg{err: ai.ErrUnavailable}))
+	if !m.settingEdit || m.settingEditing != settingAIModel {
+		t.Fatal("no fallback to typing the model")
+	}
+	for _, r := range "llama3.2" {
+		m.modalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("enabled", func() bool { return !m.busy && m.cfg.AI.Model == "llama3.2" })
+
+	if !m.cfg.AI.Enabled {
+		t.Error("typing the model did not finish switching AI on")
+	}
+	if f, _ := m.selectedSetting(); f.id != settingAIEnabled {
+		t.Errorf("cursor left on %q", f.label)
+	}
+}
+
+// Abandoning the choice abandons the enable: with no model, switching AI on
+// would write a configuration the loader refuses.
+func TestCancellingTheModelLeavesAIOff(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Endpoint = modelServer(t, "llama3.2")
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Enabled")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEsc}))
+
+	if m.modal != "settings" {
+		t.Errorf("Esc left the panel instead of the picker: modal=%q", m.modal)
+	}
+	if m.cfg.AI.Enabled {
+		t.Error("AI was switched on with no model")
+	}
+	if m.enablingAI {
+		t.Error("an abandoned enable stayed pending")
+	}
+	if !strings.Contains(m.notice, "stayed off") {
+		t.Errorf("notice = %q, want it to say the enable did not happen", m.notice)
+	}
+	// A later, unrelated model choice must not switch AI on behind the reader.
+	selectSetting(t, m, "Model")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	d.settle("model", func() bool { return !m.busy && m.cfg.AI.Model != "" })
+	if m.cfg.AI.Enabled {
+		t.Error("an abandoned enable was resurrected by a later model choice")
+	}
+}
+
+// The picker borrows m.choice from the panel, so leaving it must put the
+// panel's own cursor back rather than stranding the reader on whatever row the
+// picker's index happened to line up with.
+func TestModelPickerRestoresThePanelCursor(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	c := m.cfg
+	c.AI.Provider = string(ai.ProviderOllama)
+	c.AI.Endpoint = modelServer(t, "a", "b", "c", "d")
+	d.run(m.saveConfig(c))
+	d.settle("seeded", func() bool { return !m.busy && m.cfg.AI.Endpoint != "" })
+
+	d.run(m.action("Open settings"))
+	selectSetting(t, m, "Model")
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.modal != "ai-models" {
+		t.Fatalf("picker did not open: %q", m.modal)
+	}
+	// Move within the picker, so its index is nowhere near the panel's row.
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyDown}))
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEsc}))
+
+	if m.modal != "settings" {
+		t.Fatalf("modal = %q, want the panel", m.modal)
+	}
+	if f, _ := m.selectedSetting(); f.id != settingAIModel {
+		t.Errorf("returned to %q, want the row the picker was opened from", f.label)
 	}
 }
