@@ -319,7 +319,9 @@ func (m *Model) pickRecipient(c contacts.Contact) tea.Cmd {
 		}
 		p := t.Participants[0]
 		if p.Number == c.PhoneNumber || (key != "" && contacts.MatchKey(p.Number) == key) {
-			return m.openThread(t)
+			cmd := m.openThread(t)
+			m.focusArea(paneComposer)
+			return cmd
 		}
 	}
 	m.choose(c)
@@ -805,6 +807,9 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if m.searching {
 			return m, m.searchKey(v)
 		}
+		if m.history.enabled && m.history.search {
+			return m, m.conversationKey(v)
+		}
 		if v.String() == "ctrl+p" {
 			m.openPalette()
 			return m, nil
@@ -837,7 +842,27 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if v.String() == "ctrl+shift+enter" {
 			return m, m.openSchedule()
 		}
+		if m.history.enabled {
+			switch v.String() {
+			case "alt+1":
+				m.focusArea(paneThreads)
+				return m, nil
+			case "alt+2":
+				m.focusArea(paneConversation)
+				return m, nil
+			case "alt+3":
+				m.focusArea(paneComposer)
+				return m, nil
+			}
+		}
 		if v.String() == "alt+esc" {
+			if m.history.enabled && !m.focus {
+				if m.history.pane == paneConversation {
+					return m, m.conversationKey(tea.KeyMsg{Type: tea.KeyEsc})
+				}
+				m.setPane(paneThreads)
+				return m, nil
+			}
 			return m, m.leaveComposer()
 		}
 		if v.String() == "tab" || v.String() == "shift+tab" {

@@ -377,12 +377,13 @@ func helpSections(r tideui.Renderer, history bool, width int) []string {
 func historyHelp() []helpGroup {
 	return []helpGroup{
 		{"Moving around", []string{
-			"Tab            Cycle threads / history / composer",
+			"Tab / Shift+Tab Sidebar ↔ composer",
+			"Alt+1/2/3      Threads / history / compose",
 			"j/k or ↑↓      Select thread or message",
 			"Enter          Open thread · inspect message",
 			"g / G          Oldest loaded · newest and mark read",
 			"PgUp/PgDn      Scroll message lines",
-			"c / Esc        Contact list · back to threads",
+			"c / Esc        Contacts · step back to threads",
 		}},
 		{"The conversation", []string{
 			"r              Reply (failed message: prepare retry)",
@@ -419,7 +420,7 @@ func composeHelp() []helpGroup {
 			"/              Search          n      New message",
 			"a / e          Add · edit      d      Delete",
 			"t              Theme           r      Refresh from phone",
-			"Tab / Esc      Cycle panes · back to threads",
+			"Tab / Esc      Sidebar ↔ composer · step back",
 		}},
 		{"Composing", []string{
 			"Enter          Send   Ctrl+Enter and F12 also send",

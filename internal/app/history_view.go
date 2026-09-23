@@ -40,11 +40,24 @@ func (m *Model) historyView() string {
 	} else if m.recipient.PhoneNumber != "" {
 		context = "To: " + m.recipient.PhoneNumber
 	}
-	lines := []string{cr.Styles.DetailTitle.Render(contacts.SafeLabel(name)), cr.Styles.DetailMeta.Render(context)}
+	displayName := contacts.SafeLabel(name)
+	if h.pane == paneConversation {
+		displayName = "▸ History · " + displayName
+	}
+	lines := []string{cr.Styles.DetailTitle.Render(displayName), cr.Styles.DetailMeta.Render(context)}
 	history := h.view.View(cr, h.pane == paneConversation)
 	lines = append(lines, strings.Split(history, "\n")...)
 	separator := cr.Styles.DetailMeta.Render(strings.Repeat("─", cw))
-	lines = append(lines, separator)
+	composeLabel := "Compose"
+	if h.pane == paneComposer {
+		composeLabel = "▸ Compose"
+	}
+	composeRule := composeLabel + " " + strings.Repeat("─", max(0, cw-ansi.StringWidth(composeLabel)-1))
+	if h.pane == paneComposer {
+		lines = append(lines, cr.Styles.Badge.Render(ansi.Truncate(composeRule, cw, "")))
+	} else {
+		lines = append(lines, cr.Styles.DetailMeta.Render(ansi.Truncate(composeRule, cw, "")))
+	}
 	if notice := m.composerNotice(); notice != "" {
 		lines = append(lines, cr.Styles.StatusError.Render(notice))
 	}
@@ -53,9 +66,22 @@ func (m *Model) historyView() string {
 		ed = append(ed, "")
 	}
 	lines = append(lines, ed[:eh]...)
-	hint := "Enter / F12 send · Shift+Enter newline · Alt+Esc history"
+	backHint := "Esc history"
+	if m.cfg.Composer.Mode == "vim" {
+		backHint = "Alt+Esc history"
+	}
+	hint := "Enter send · Shift+Enter newline · Tab sidebar · " + backHint
+	if !m.cfg.Composer.EnterSends {
+		hint = "F12 send · Enter newline · Tab sidebar · " + backHint
+	}
 	if h.pane == paneConversation {
-		hint = "j/k select · r reply · v preview · / search · , settings"
+		hint = "↑↓ select · r reply · Esc threads · Tab compose"
+		if h.active != nil && h.active.IsGroup {
+			hint = "↑↓ select · Esc threads · Tab sidebar"
+		}
+	}
+	if h.pane == paneThreads || h.pane == paneContacts {
+		hint = "Enter open · Tab compose · Alt+2 history"
 	}
 	if h.search || h.searchQuery != "" {
 		hint = "/ " + h.searchQuery + fmt.Sprintf(" · %d matches · n/N next", len(h.searchResults))
@@ -76,7 +102,11 @@ func (m *Model) historyView() string {
 	for i, line := range lines {
 		lines[i] = tideui.StyleOver(paint, ansi.Truncate(line, cw, ""))
 	}
-	rightPane := tideui.Pane{Title: "Conversation", Hint: h.view.Position(), Content: strings.Join(lines, "\n"), Focused: h.pane == paneConversation || h.pane == paneComposer, Accent: cr.Styles.Theme.BorderFocus}
+	title := "Conversation"
+	if h.pane == paneConversation {
+		title += " · History"
+	}
+	rightPane := tideui.Pane{Title: title, Hint: h.view.Position(), Content: strings.Join(lines, "\n"), Focused: h.pane == paneConversation || h.pane == paneComposer, Accent: cr.Styles.Theme.BorderFocus}
 	status := components.Status(m.currentDevice(), r.Styles.Theme.Name, m.editor.Mode(), m.outboxSuffix())
 	status.Left += " | " + h.status
 	if d := m.currentDevice(); d != nil && !d.Connected {
@@ -90,8 +120,8 @@ func (m *Model) historyView() string {
 		// their own: threads already carry resolved names, so the list is only
 		// wanted when it is being used, and the conversation gets the width.
 		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts · , settings", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes), Focused: h.pane == paneThreads}
-		if h.pane == paneContacts {
-			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: true}
+		if m.sidebarPane() == paneContacts {
+			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: h.pane == paneContacts}
 		}
 		layout.Panes = [3]tideui.Pane{sidebar, rightPane}
 	} else {

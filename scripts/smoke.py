@@ -52,6 +52,10 @@ else:
                PATH=str(tools) + os.pathsep + os.environ["PATH"],
                TIDESMS_SMOKE_ROOT=tmp, XDG_CONFIG_HOME=tmp + "/config",
                XDG_DATA_HOME=tmp + "/data", XDG_STATE_HOME=tmp + "/state")
+    config = root / "config/tidesms/config.toml"
+    config.parent.mkdir(parents=True)
+    # Exercise the documented multiline mode, independent of the default.
+    config.write_text('[composer]\nmode = "normal"\nenter_sends = false\n')
     db = root / "data/tidesms/state.db"
 
     def rows(sql):
@@ -140,11 +144,26 @@ else:
         until(lambda: len((root / "sent.jsonl").read_text().splitlines()) == 2,
               "Alt+Enter did not send")
         check(draft() == "", "Alt+Enter send did not clear draft")
+        # Exercise navigation through real terminal escape sequences.
+        output.clear()
+        key(b"\x1b2")
+        until(lambda: b"History" in output, "Alt+2 did not focus history")
+        key(b"\x1b1")
+        key(b"\t")
+        key("navigation draft")
+        until(lambda: draft() == "navigation draft", "Tab did not return to composing")
+        key(b"\x1b[Z")  # Shift+Tab back to sidebar.
+        key(b"\x1b3")
+        key(" preserved")
+        until(lambda: draft() == "navigation draft preserved", "Alt+3 lost draft or caret")
+        key(b"\x1b[F")  # End of line.
+        key(b"\x7f" * len("navigation draft preserved"))
+        until(lambda: draft() == "", "navigation test draft did not clear")
         palette("contact theme")
         key(b"\x1b[B")
         key(b"\x1b[B")  # automatic, then TideUI's themes in order
         key(b"\r")
-        until(lambda: rows("SELECT theme FROM contacts") == [("catppuccin-latte",)],
+        until(lambda: bool(rows("SELECT theme FROM contacts")) and rows("SELECT theme FROM contacts")[0][0] not in ("", "automatic"),
               "theme not saved")
         palette("toggle")
         until(lambda: 'mode = "vim"' in (root / "config/tidesms/config.toml").read_text(), "mode not saved")

@@ -3,6 +3,10 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## Keyboard pane navigation
+
+Enter opens a thread ready to compose. Tab/Shift+Tab toggle the remembered sidebar and draft; Alt+1/2/3 focus threads/history/composer. Escape steps back through history to threads, with search/dialog dismissal first and Vim mode handling preserved. Read-only groups toggle sidebar/history. Existing headers and separators identify the focused area without extra rows.
+
 ## History rendering performance
 
 Conversation layouts reuse unchanged text and image bubbles when older pages arrive. Width, theme, search, sender names, message changes, and attachment file changes invalidate cached output. Graphics transmissions are limited to visible messages. A 1,000-message text re-layout benchmark fell from roughly 28 ms to 1.1 ms on this machine.

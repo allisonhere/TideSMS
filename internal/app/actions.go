@@ -12,11 +12,12 @@ import (
 	"strings"
 )
 
-var commands = []string{"New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Polish writing", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages", "Search all messages", "Mute thread", "Unmute thread", "Toggle notification body preview", "Contact details"}
+var commands = []string{"Focus threads", "Focus history", "Focus composer", "New message", "Add contact", "Edit contact", "Delete contact", "Change contact theme", "Switch device", "Toggle composer mode", "Open settings", "Send message", "Quit", "Search current thread", "Refresh conversations", "Change thread theme", "Mark thread unread", "Copy phone number", "Open contact", "Jump to newest", "Sync phone contacts", "Toggle message bubbles", "Toggle bubble corners", "Toggle bubble fill", "Change incoming bubble theme", "Change outgoing bubble theme", "Change thread incoming bubble theme", "Change thread outgoing bubble theme", "Change AI policy", "Change thread AI policy", "AI: Review writing", "AI: Fix spelling", "AI: Fix grammar", "AI: Clean up", "AI: Polish writing", "AI: Make shorter", "AI: Make friendlier", "AI: Make professional", "AI: Make clearer", "AI: Custom rewrite…", "Schedule message", "Open outgoing queue", "Send queued messages", "Search all messages", "Mute thread", "Unmute thread", "Toggle notification body preview", "Contact details"}
 
 // historyCommands are the palette entries that only make sense with the
 // conversation view, so a plain compose session does not offer them.
 var historyCommands = map[string]bool{
+	"Focus threads": true, "Focus history": true, "Focus composer": true,
 	"Search current thread": true, "Refresh conversations": true, "Change thread theme": true,
 	"Mark thread unread": true, "Copy phone number": true, "Open contact": true, "Jump to newest": true,
 	"Sync phone contacts": true, "Toggle message bubbles": true, "Toggle bubble corners": true,

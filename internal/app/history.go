@@ -48,6 +48,7 @@ type historyState struct {
 	source         backend.ConversationBackend
 	engine         *syncer.Engine
 	pane           int
+	sidebarPane    int
 	threads        []domain.Thread
 	threadSelected string
 	active         *domain.Thread
@@ -116,7 +117,7 @@ func (m *Model) initHistory() {
 	if !ok || !yes {
 		return
 	}
-	m.history = historyState{enabled: true, store: s, source: b, engine: &syncer.Engine{Store: s, Backend: b, PageSize: m.cfg.Sync.PageSize}, pane: paneThreads, view: conversation.New(), views: map[string]conversation.Model{}, limit: m.cfg.Sync.InitialMessages, status: "Cached", started: time.Now()}
+	m.history = historyState{enabled: true, store: s, source: b, engine: &syncer.Engine{Store: s, Backend: b, PageSize: m.cfg.Sync.PageSize}, pane: paneThreads, sidebarPane: paneThreads, view: conversation.New(), views: map[string]conversation.Model{}, limit: m.cfg.Sync.InitialMessages, status: "Cached", started: time.Now()}
 }
 func (m *Model) loadCache() tea.Cmd {
 	if !m.history.enabled {
@@ -142,6 +143,9 @@ func (m *Model) loadCache() tea.Cmd {
 }
 func (m *Model) setPane(p int) {
 	m.history.pane = p
+	if p == paneContacts || p == paneThreads {
+		m.history.sidebarPane = p
+	}
 	m.focus = p == paneComposer
 	m.editor.Focus(m.focus && !m.sending)
 }
@@ -150,24 +154,40 @@ func (m *Model) cyclePane(back bool) {
 		m.setFocus(!m.focus)
 		return
 	}
-	// Contacts occupy the threads slot when shown, so Tab moves on from them
-	// rather than cycling through a pane that is usually hidden.
-	panes := []int{paneThreads, paneConversation, paneComposer}
-	if m.width < 70 {
-		panes = []int{paneContacts, paneThreads, paneConversation, paneComposer}
-	}
-	idx := 0
-	for i, p := range panes {
-		if p == m.history.pane {
-			idx = i
+	switch m.history.pane {
+	case paneThreads, paneContacts:
+		m.focusArea(paneComposer)
+	case paneConversation:
+		if back || (m.history.active != nil && m.history.active.IsGroup) {
+			m.setPane(m.sidebarPane())
+		} else {
+			m.focusArea(paneComposer)
 		}
+	default:
+		m.setPane(m.sidebarPane())
 	}
-	step := 1
-	if back {
-		step = len(panes) - 1
-	}
-	m.setPane(panes[(idx+step)%len(panes)])
 }
+
+func (m *Model) sidebarPane() int {
+	if m.history.sidebarPane == paneContacts {
+		return paneContacts
+	}
+	return paneThreads
+}
+
+// focusArea changes focus without reopening a thread or resetting its draft.
+func (m *Model) focusArea(p int) {
+	if p == paneComposer && m.history.active != nil && m.history.active.IsGroup {
+		p = paneConversation
+	}
+	if (p == paneConversation && m.history.active == nil) || (p == paneComposer && m.history.active == nil && m.recipient.PhoneNumber == "") {
+		m.setPane(m.sidebarPane())
+		m.notify("Open a conversation or choose a recipient first", false)
+		return
+	}
+	m.setPane(p)
+}
+
 func (m *Model) draftKey() string {
 	if m.history.enabled && m.history.active != nil {
 		return m.history.active.ID
@@ -650,7 +670,7 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 				cmd := m.openThread(*t)
 				// Opening from the thread list drops straight into the
 				// composer, so a reply needs no separate "r".
-				m.setPane(paneComposer)
+				m.focusArea(paneComposer)
 				return cmd
 			}
 		case "r":
@@ -721,7 +741,7 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			m.editor.SetValue(msg.Body)
 			m.trackChange()
 		}
-		m.setPane(paneComposer)
+		m.focusArea(paneComposer)
 	case "/":
 		if h.active != nil {
 			h.search = true
@@ -741,6 +761,10 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 			m.layoutConversation()
 		}
 	case "esc":
+		if h.searchQuery == "" {
+			m.setPane(paneThreads)
+			return nil
+		}
 		h.searchQuery = ""
 		h.searchResults = nil
 		h.searchRevision++
@@ -993,6 +1017,17 @@ func (m *Model) historyAction(name string) (bool, tea.Cmd) {
 		return false, nil
 	}
 	switch name {
+	case "Focus threads", "Focus history", "Focus composer":
+		m.modal = ""
+		p := paneThreads
+		if name == "Focus history" {
+			p = paneConversation
+		}
+		if name == "Focus composer" {
+			p = paneComposer
+		}
+		m.focusArea(p)
+		return true, nil
 	case "Refresh conversations":
 		m.modal = ""
 		return true, m.startSession(true)

@@ -299,3 +299,9 @@ TIDESMS_TEST_DEVICE=YOUR_DEVICE_ID go test ./internal/backend/kdeconnect -run Te
 ```
 
 Tests drive the real model through the fake backend, covering cached-first startup, synchronization and deduplication, live incoming messages, notification policy and per-thread muting, send/fail/retry, thread-scoped drafts, search, thread themes, offline browsing and reconnect, the offline queue and scheduling, AI review and rewrite, and layout bounds at every adaptive width. Attachments and MMS are not implemented; notification action buttons and contact merge review are planned.
+
+### Keyboard focus
+
+Enter on a thread opens its composer. **Tab** or **Shift+Tab** toggles between the sidebar and draft; from history, Tab goes to compose and Shift+Tab returns to the sidebar. **Alt+1**, **Alt+2**, and **Alt+3** focus threads, history, and compose directly. The same actions are available in the command palette.
+
+**Esc** steps back from compose to history to threads. Search and dialogs close first. Vim keeps its first Esc for editor mode; use Alt+Esc or a clean second Esc to leave composing. Contacts remain an explicit sidebar choice, remembered when tabbing back. Read-only groups focus history instead of the composer. Focus labels use the existing headers and separators.
