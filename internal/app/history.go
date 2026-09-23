@@ -194,6 +194,10 @@ func (m *Model) draftKey() string {
 	}
 	return m.recipient.PhoneNumber
 }
+// OpenThreadOnStart opens a conversation, by id, as soon as the cached list
+// has been read: `tidesms --open ID`, which is how TideDeck opens one.
+func (m *Model) OpenThreadOnStart(id string) { m.startThread = id }
+
 func (m *Model) openThread(t domain.Thread) tea.Cmd {
 	if m.history.active != nil {
 		m.history.views[m.history.active.ID] = m.history.view
@@ -884,6 +888,21 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 		}
 		if m.selectedThread() == nil && len(h.threads) > 0 {
 			h.threadSelected = h.threads[0].ID
+		}
+		// A conversation named on the command line opens as soon as the cache
+		// has it, ready for a reply, as Enter on it would. An empty cache is
+		// one not yet filled from the phone, so it is waited for.
+		if id := m.startThread; id != "" && len(h.threads) > 0 {
+			m.startThread = ""
+			for _, t := range h.threads {
+				if t.ID == id {
+					h.threadSelected = t.ID
+					cmd := m.openThread(t)
+					m.focusArea(paneComposer)
+					return true, cmd
+				}
+			}
+			m.notify("That conversation isn't in the cache yet", true)
 		}
 
 		if h.active != nil && strings.Contains(h.active.ID, ":local-") {

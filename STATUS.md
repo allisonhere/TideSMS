@@ -3,6 +3,16 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## An API, and a TideDeck panel
+
+`tidesms api threads|messages|send|read` prints JSON for other programs, from the same cache the app renders and through the same send path (`internal/api`). `tidesms reply ID` is a small full-screen reply window (`internal/reply`) sharing the app's drafts and undo window; `tidesms --open ID` starts the app on a conversation, waiting for a filled cache before giving up on it. `api threads --format tidedeck` prints a TideDeck document in the mail panel's shape: a block per conversation carrying its id, bright when unread, with the unread total as the badge.
+
+`contrib/tidedeck/` is the plugin: Enter runs `tidesms reply ID` and e runs `tidesms --open ID`, both with the terminal handed over. TideDeck passes settings only to render, so `run.sh` finds the binary as `$TIDESMS_BIN`, then `tidesms` on the PATH, then `~/.local/bin`, and otherwise shows a setup hint rather than a blank panel.
+
+Verified: TideDeck's own `LoadManifest`, `Exec`, `Refresh`, `View`, `Launch` and `Edit`, run against the plugin from a scratch module pointing at the TideDeck checkout, accept the manifest, draw the panel with its badge, and produce `run.sh reply thread:…` for Enter and `run.sh app thread:…` for e. The API read the live cache (17 unread). The reply window was driven in a pseudo-terminal on the demo's invented data: it drew the conversation, and Esc closed it keeping the typed text as a draft. Found and fixed there: flags after the id were taken as extra arguments.
+
+Not yet verified: the panel inside a running TideDeck, and a reply sent from it to a real phone.
+
 ## Sending pictures
 
 Pictures can be pasted (Ctrl+V when the clipboard holds a picture and no text, or **Paste picture from clipboard**) or picked (**Alt+A**: recent pictures from Pictures, Downloads, Desktop and Documents, a typed path with Tab completion, and a braille preview). They attach to the conversation's draft, as text does, and are held in memory only. Each is copied into `~/.cache/tidesms/outgoing/`, and photos over 1.5 MB are scaled to 1600 px JPEG with ImageMagick; GIFs are sent as they are. Up to five per message, with or without text.

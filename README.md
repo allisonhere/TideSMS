@@ -86,6 +86,42 @@ Everything you've already synced stays readable and searchable. If you send whil
 
 If you'd like queued and scheduled messages to go out even when TideSMS isn't open, run `tidesms-daemon` (see [Background sending](#background-sending)).
 
+## TideDeck and other programs
+
+TideSMS has a small command-line API, so other programs can show your messages and reply to them. [TideDeck](https://github.com/allisonhere/tidedeck) uses it for a **Messages** panel.
+
+### The TideDeck panel
+
+The panel lists your recent conversations the way TideDeck's mail panel lists mail: who, how long ago, and the last message, with unread conversations bright and the unread count as the pane's badge. Give the pane the keyboard with **Space**, pick a conversation with the arrows, then:
+
+- **Enter** opens a small reply window: the conversation's recent messages and a reply box. **Enter** sends (with the same undo window as the app), and **Esc** closes it and keeps what you typed as a draft, which TideSMS shows too.
+- **e** opens the conversation in TideSMS itself.
+
+To set it up, put `tidesms` where TideDeck can find it, and copy the plugin into TideDeck's plugins:
+
+```sh
+make build
+install -Dm755 tidesms ~/.local/bin/tidesms
+cp -r contrib/tidedeck ~/.config/tidedeck/plugins/tidesms.messages
+```
+
+Restart TideDeck and enable **Messages** from the panel picker. Its settings choose how many conversations to show and whether to list only unread ones.
+
+### The API
+
+Every command prints JSON and accepts `--config`, `--database` and `--log`. Conversation ids come from `api threads`.
+
+```sh
+tidesms api threads [--limit N] [--unread] [--format json|tidedeck]
+tidesms api messages --thread ID [--limit N]
+tidesms api send --thread ID --text "On my way" [--attach photo.jpg]
+tidesms api read --thread ID
+tidesms reply ID      # the small reply window
+tidesms --open ID     # the full app, on that conversation
+```
+
+`api threads` reports each conversation's `id`, `name`, `numbers`, `unread`, `lastMessage`, `lastTime`, and whether it's `replyable` (groups aren't), along with the unread total. Fields are only ever added; `schemaVersion` changes if one ever has to change meaning. `api send` stores the message exactly as the app would, so it shows up there, as *failed* with a retry if the phone didn't take it.
+
 ## Making it yours
 
 Press **,** (or **Ctrl+O** from anywhere) for settings. Changes preview as you make them. **Ctrl+S** saves, and **Esc** puts everything back.
@@ -238,6 +274,7 @@ python3 scripts/smoke.py   # the real binary in a pseudo-terminal, with a fake p
 go run ./scripts/demo      # the full app on invented data
 python3 scripts/drive.py   # the real app against your config, in a throwaway home, printed as text
 python3 scripts/screenshot.py  # regenerate docs/screenshot.png from the demo
+contrib/tidedeck/run.sh render # what the TideDeck panel prints
 ```
 
 The tests drive the real app through a fake backend, so none of them need a phone. There's one opt-in test against a real device, and it only reads:

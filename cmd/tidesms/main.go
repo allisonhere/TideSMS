@@ -27,7 +27,22 @@ func main() {
 		}
 		return
 	}
-	if err := run(); err != nil {
+	// Subcommands for other programs: TideDeck, scripts.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "api":
+			exitOn(runAPI(os.Args[2:], os.Stdout))
+			return
+		case "reply":
+			exitOn(runReply(os.Args[2:]))
+			return
+		}
+	}
+	exitOn(run())
+}
+
+func exitOn(err error) {
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "TideSMS:", err)
 		os.Exit(1)
 	}
@@ -38,6 +53,7 @@ func run() (runErr error) {
 	flag.StringVar(&paths.Config, "config", paths.Config, "config file")
 	flag.StringVar(&paths.Database, "database", paths.Database, "SQLite state file")
 	flag.StringVar(&paths.Log, "log", paths.Log, "structured log file")
+	open := flag.String("open", "", "open this conversation, ready to reply (an id from tidesms api threads)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("TideSMS", version)
@@ -76,6 +92,9 @@ func run() (runErr error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	model := app.New(ctx, repo, kdeconnect.New(log, cfg.Logging.DebugContent), cfg, paths.Config, log, startErr)
+	if *open != "" {
+		model.OpenThreadOnStart(*open)
+	}
 	// Request disambiguation for Ctrl+Enter; restore terminal protocols on all returns.
 	if _, err := fmt.Fprint(os.Stdout, "\x1b[>1u\x1b[>4;2m"); err != nil {
 		return err

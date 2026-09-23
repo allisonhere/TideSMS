@@ -144,6 +144,8 @@ type Model struct {
 	// hold is a sent message still inside its undo window.
 	hold    *sendHold
 	holdSeq int
+	// startThread is a conversation to open once the cache is read.
+	startThread string
 	// attached holds each draft's pictures, keyed as drafts are.
 	attached map[string][]media.Outgoing
 	// The picture picker: recent pictures, what the query lists, and cached

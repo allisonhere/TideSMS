@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "tidesms.messages",
+  "name": "Messages",
+  "version": "1.0.0",
+  "author": "tidesms",
+  "description": "Your text messages from TideSMS: who wrote, what they said, and a reply without leaving the deck.",
+  "kinds": ["panel"],
+  "entryPoints": { "panel": ["./run.sh", "render"] },
+  "panel": {
+    "displayName": "Messages",
+    "description": "Recent text messages from TideSMS. Enter replies; e opens the conversation in TideSMS.",
+    "glyph": "💬",
+    "category": "Messages",
+    "open": ["./run.sh", "reply", "{id}"],
+    "edit": ["./run.sh", "app", "{id}"],
+    "refreshSeconds": 20,
+    "minWidth": 26,
+    "minHeight": 6,
+    "priority": 56,
+    "schema": [
+      { "key": "count", "type": "number", "label": "conversations shown",
+        "description": "How many conversations the panel lists, 1 to 50.", "defaultValue": "6" },
+      { "key": "unread", "type": "boolean", "label": "unread only",
+        "description": "List only conversations with messages you haven't read.", "defaultValue": false }
+    ]
+  }
+}
