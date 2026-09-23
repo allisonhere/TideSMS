@@ -71,6 +71,9 @@ func (m *Model) historyView() string {
 	if notice := m.composerNotice(); notice != "" {
 		lines = append(lines, cr.Styles.StatusError.Render(notice))
 	}
+	if line := m.attachLine(); line != "" {
+		lines = append(lines, cr.Styles.Badge.Render(ansi.Truncate(line, cw, "…")))
+	}
 	ed := strings.Split(m.editor.View(cr.Styles.Theme.BorderFocus), "\n")
 	for len(ed) < eh {
 		ed = append(ed, "")

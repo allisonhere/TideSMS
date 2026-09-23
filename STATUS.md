@@ -3,6 +3,28 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## Sending pictures
+
+Pictures can be pasted (Ctrl+V when the clipboard holds a picture and no text, or **Paste picture from clipboard**) or picked (**Alt+A**: recent pictures from Pictures, Downloads, Desktop and Documents, a typed path with Tab completion, and a braille preview). They attach to the conversation's draft, as text does, and are held in memory only. Each is copied into `~/.cache/tidesms/outgoing/`, and photos over 1.5 MB are scaled to 1600 px JPEG with ImageMagick; GIFs are sent as they are. Up to five per message, with or without text.
+
+`kdeconnect-cli --attachment` is accepted and then discarded (upstream `cli/kdeconnect-cli.cpp` marks it `Q_UNUSED` with a TODO), so a message with pictures goes over D-Bus: `replyToConversation(threadID, text, attachments)` for a thread the phone knows, `sendWithoutConversation([(address)], text, attachments)` for a new one. The daemon opens each attachment with `QFile(string)`, a plain path rather than a URL, and sends an empty part for a file it cannot read without reporting an error, so every file is checked before the call. Text-only messages still use the CLI.
+
+Pictures are refused, and stay attached, when the phone is offline (the queue stores text only), when scheduling, and for group threads. A failed picture message brings its picture back on retry.
+
+Verified with automated tests against the fake phone, and in the real interface through the demo.
+
+Found in the first real use: a picture sent without text failed, twice, without reaching the phone. The backend's `Send` refused an empty message before it looked at the attachments; the backend test always included text, and the app tests use the fake phone, which makes no such check. It now refuses only a message with neither text nor pictures, and `TestAPictureNeedsNoText` covers it. Failed sends are now logged with their reason (never the text or number); that failure left no trace in the log and had to be read from the database.
+
+Not yet verified: a picture arriving on a phone. `TestLiveSendPicture` sends one when given `TIDESMS_TEST_DEVICE` and `TIDESMS_TEST_MMS_TO`.
+
+## Device checks over D-Bus
+
+Device listing used `kdeconnect-cli --list-devices`, which measured 2.0 s on every call here (it runs network discovery) and timed out at 12 s seventeen times in about thirty hours of the live log. Every send ran one first. Devices, reachability and the SMS plugin now come from the daemon over D-Bus (`daemon.devices`, the device's `isReachable` and `name` properties, `hasPlugin`), measured at 1 ms, with the CLI kept as a fallback when the bus cannot be reached. `TestLiveBusDevicesMatchTheCLI` checks both paths agree against the real daemon; it passed against the paired phone. The check a send makes is logged as `send check` rather than `discover`, so a failed send can be told from a routine refresh. The smoke test now runs without a session bus so it can only see its fake phone.
+
+Fixed: an attachment download read a closed signal channel as a nil signal, which would crash if the bus connection closed mid-download.
+
+Checked and left alone: all 454 outgoing messages in the live database are phone-confirmed `sent`, and no local submission is left unreconciled, so the send path and its echo matching are working.
+
 ## Undo send and message runs
 
 A sent message waits `[composer] undo_seconds` (default 4, **Settings → Undo send**) before leaving. The status line counts down; Esc takes it back with the draft intact and Enter sends at once. Quitting inside the window is refused. An offline phone skips the window and goes straight to the queue prompt.

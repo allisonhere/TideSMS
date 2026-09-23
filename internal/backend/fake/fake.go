@@ -42,7 +42,7 @@ type Backend struct {
 }
 
 func New() *Backend {
-	return &Backend{DeviceList: []backend.Device{{ID: "phone", Name: "Fixture phone", Connected: true, SMSCapability: "available", Capabilities: backend.Capabilities{SendText: true, ReceiveText: true, Groups: true, ReceiveMedia: true, ContactSync: true}}}, History: map[string][]domain.Message{}, subs: map[chan domain.Event]context.Context{}}
+	return &Backend{DeviceList: []backend.Device{{ID: "phone", Name: "Fixture phone", Connected: true, SMSCapability: "available", Capabilities: backend.Capabilities{SendText: true, ReceiveText: true, Groups: true, ReceiveMedia: true, SendMedia: true, ContactSync: true}}}, History: map[string][]domain.Message{}, subs: map[chan domain.Event]context.Context{}}
 }
 func (b *Backend) Devices(context.Context) ([]backend.Device, error) {
 	b.mu.Lock()

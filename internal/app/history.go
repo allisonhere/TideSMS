@@ -349,7 +349,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery, Group: m.history.active != nil && m.history.active.IsGroup})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)-attachLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery, Group: m.history.active != nil && m.history.active.IsGroup})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -776,6 +776,7 @@ func (m *Model) conversationKey(k tea.KeyMsg) tea.Cmd {
 		if msg := h.view.Current(); msg != nil && msg.Status == domain.Failed && msg.BackendID == "" {
 			h.retryID = msg.ID
 			m.editor.SetValue(msg.Body)
+			m.restoreAttachments(*msg)
 			m.trackChange()
 		}
 		m.focusArea(paneComposer)
@@ -1022,7 +1023,11 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 			ctx := m.ctx
 			msg := v.message
 			return true, tea.Batch(m.loadCache(), func() tea.Msg {
-				err := b.Send(ctx, backend.SendRequest{DeviceID: msg.DeviceID, PhoneNumber: phone, ThreadID: msg.ThreadID, Message: msg.Body})
+				var files []string
+				for _, a := range msg.Attachments {
+					files = append(files, a.LocalPath)
+				}
+				err := b.Send(ctx, backend.SendRequest{DeviceID: msg.DeviceID, PhoneNumber: phone, ThreadID: msg.ThreadID, Message: msg.Body, Attachments: files})
 				status := domain.Submitted
 				if err != nil {
 					status = domain.Failed
@@ -1038,10 +1043,16 @@ func (m *Model) historyUpdate(raw tea.Msg) (bool, tea.Cmd) {
 		m.sending = false
 		m.editor.Focus(m.focus)
 		if v.err != nil {
+			// The reason only: backend errors never carry the message or number.
+			m.logError("send", v.err)
 			m.notify(v.err.Error(), true)
 			return true, m.loadCache()
 		}
 		m.notify("✓ Submitted · delivery unverified", false)
+		if len(v.message.Attachments) > 0 && sameAttachments(m.attached[v.draftKey], v.message.Attachments) {
+			delete(m.attached, v.draftKey)
+			m.layoutConversation()
+		}
 		d := m.drafts[v.draftKey]
 		if d.Revision == v.draft.Revision && d.Body == v.draft.Body {
 			d.Body = ""

@@ -144,6 +144,13 @@ type Model struct {
 	// hold is a sent message still inside its undo window.
 	hold    *sendHold
 	holdSeq int
+	// attached holds each draft's pictures, keyed as drafts are.
+	attached map[string][]media.Outgoing
+	// The picture picker: recent pictures, what the query lists, and cached
+	// previews of them.
+	attachRecent, attachCands []media.Candidate
+	attachSeq                 int
+	attachPreviews            map[string][]string
 	outboxEntries  []outboxEntry
 	schedInput     textinput.Model
 	queuedCount    int
@@ -197,7 +204,7 @@ type sentMsg struct {
 type quitMsg struct{ err error }
 
 func New(ctx context.Context, s Repository, b backend.MessagingBackend, c config.Config, path string, log *slog.Logger, startupError error) *Model {
-	m := &Model{ctx: ctx, store: s, backend: b, cfg: c, configPath: path, log: log, editor: composer.New(c.Composer.Mode), drafts: map[string]storage.Draft{}, deviceID: c.KDEConnect.PreferredDevice, notifier: notifications.Show}
+	m := &Model{ctx: ctx, store: s, backend: b, cfg: c, configPath: path, log: log, editor: composer.New(c.Composer.Mode), drafts: map[string]storage.Draft{}, attached: map[string][]media.Outgoing{}, attachPreviews: map[string][]string{}, deviceID: c.KDEConnect.PreferredDevice, notifier: notifications.Show}
 	m.filter = textinput.New()
 	m.filter.CharLimit = 100
 	m.aiInput = textinput.New()
@@ -623,6 +630,23 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.updateEditor(v.msg)
 	case holdTickMsg:
 		return m, m.holdTick(v)
+	case attachedMsg:
+		return m, m.handleAttached(v)
+	case recentPicturesMsg:
+		if m.modal == "attach" && v.seq == m.attachSeq {
+			m.attachRecent = v.found
+			m.refreshAttach()
+		}
+		return m, nil
+	case pasteCheckMsg:
+		// A picture on its own attaches; anything else is typed as usual.
+		if v.epoch != m.editorEpoch || !m.focus || m.modal != "" || m.sending {
+			return m, nil
+		}
+		if v.picture {
+			return m, m.attachClipboard()
+		}
+		return m, m.updateEditor(v.key)
 	case aiResultMsg:
 		m.handleAIResult(v)
 		return m, nil
@@ -950,6 +974,11 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		if v.String() == "ctrl+l" {
 			return m, m.openDetails()
 		}
+		// Alt+A attaches a picture from anywhere a conversation is open;
+		// Ctrl+A already selects all in the composer.
+		if v.String() == "alt+a" && m.history.enabled {
+			return m, m.openAttachPicker()
+		}
 		// Enter submits from the composer (below); Ctrl+Enter and F12 are the
 		// explicit keys that work from any pane and whatever the terminal
 		// reports for a bare Enter.
@@ -1011,6 +1040,14 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.recipient.PhoneNumber == "" && m.history.active == nil {
 				m.notify("Choose a recipient first · n for a number", true)
+				return m, nil
+			}
+			// Ctrl+V pastes a picture when the clipboard holds one and no text.
+			if v.String() == "ctrl+v" && m.history.enabled {
+				return m, m.checkPaste(v)
+			}
+			// Backspace in an empty composer takes back the last picture.
+			if v.String() == "backspace" && m.editor.Value() == "" && m.removeAttachment() {
 				return m, nil
 			}
 			return m, m.updateEditor(v)

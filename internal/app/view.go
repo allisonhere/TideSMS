@@ -144,6 +144,21 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 		} else {
 			body = "No paired devices. Pair your phone in KDE Connect.\nPress r from Contacts to refresh."
 		}
+	case "attach":
+		title = "Attach a picture"
+		list := components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-24))
+		switch {
+		case len(m.choices) > 0:
+		case m.attachRecent == nil && strings.TrimSpace(m.filter.Value()) == "":
+			list = r.Styles.DetailMeta.Render("Looking for pictures…")
+		default:
+			list = r.Styles.DetailMeta.Render("No pictures here. Type a path starting with / or ~ to look elsewhere.")
+		}
+		body = m.filter.View() + "\n\n" + list
+		if preview := m.attachPreview(min(40, w-6), 8); len(preview) > 0 {
+			body += "\n\n" + strings.Join(preview, "\n")
+		}
+		hint = "Filter, or type a path · Tab completes · Enter attaches"
 	case "compose":
 		title = "New message"
 		body = m.filter.View() + "\n\n" + components.Choices(r, m.choices, m.choice, w-4, max(1, m.height-14))

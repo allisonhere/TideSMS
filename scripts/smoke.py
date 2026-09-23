@@ -51,6 +51,10 @@ else:
     env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor",
                PATH=str(tools) + os.pathsep + os.environ["PATH"],
                TIDESMS_SMOKE_ROOT=tmp, XDG_CONFIG_HOME=tmp + "/config",
+               # No session bus: the app asks the KDE Connect daemon for devices
+               # and conversations over D-Bus first, which would find a real
+               # phone. Without it, only the fake kdeconnect-cli above answers.
+               DBUS_SESSION_BUS_ADDRESS="unix:path=" + tmp + "/no-bus",
                XDG_DATA_HOME=tmp + "/data", XDG_STATE_HOME=tmp + "/state")
     config = root / "config/tidesms/config.toml"
     config.parent.mkdir(parents=True)

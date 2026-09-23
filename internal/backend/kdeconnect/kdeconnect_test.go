@@ -71,8 +71,12 @@ func TestCapabilitiesFollowSMSAvailability(t *testing.T) {
 	if !on.SendText || !on.ReceiveText || !on.Groups || !on.ReceiveMedia || !on.ContactSync {
 		t.Fatalf("available plugin missing features: %+v", on)
 	}
-	if on.SendMedia || on.DeliveryStatus {
-		t.Fatalf("KDE Connect cannot send media or report delivery: %+v", on)
+	// Pictures are sent over D-Bus; there is still no delivery report.
+	if !on.SendMedia || on.DeliveryStatus {
+		t.Fatalf("KDE Connect sends media but cannot report delivery: %+v", on)
+	}
+	if off.SendMedia {
+		t.Fatalf("unavailable plugin advertised media sending: %+v", off)
 	}
 }
 

@@ -48,7 +48,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(tmp)
+		defer func() { _ = os.RemoveAll(tmp) }()
 		dir = tmp
 	}
 	cfgPath := filepath.Join(dir, "config.toml")
@@ -69,11 +69,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	phone := fake.New()
 	phone.DeviceList = []backend.Device{{ID: device, Name: "Pixel 8", Connected: true, SMSCapability: "available",
-		Capabilities: backend.Capabilities{SendText: true, ReceiveText: true, ReceiveMedia: true}}}
+		Capabilities: backend.Capabilities{SendText: true, ReceiveText: true, ReceiveMedia: true, SendMedia: true}}}
 	now := time.Now().Truncate(time.Minute)
 	for i, t := range threads() {
 		// Names come from the address book, as they would for a real phone.

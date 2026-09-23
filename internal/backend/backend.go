@@ -25,7 +25,12 @@ type Device struct {
 	SMSCapability string
 	Capabilities  Capabilities
 }
-type SendRequest struct{ DeviceID, PhoneNumber, Message, ThreadID string }
+type SendRequest struct {
+	DeviceID, PhoneNumber, Message, ThreadID string
+	// Attachments are absolute paths of files to send with the message. The
+	// message text may be empty when there are attachments.
+	Attachments []string
+}
 type MessagingBackend interface {
 	Devices(context.Context) ([]Device, error)
 	Send(context.Context, SendRequest) error

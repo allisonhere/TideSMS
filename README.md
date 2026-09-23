@@ -13,7 +13,7 @@ Built with [TideUI](https://github.com/allisonhere/tideui) and [Ripple](https://
 - **Your real conversations**, synced from the phone and cached in SQLite. New messages arrive live.
 - **Replies like a phone.** Enter sends, Shift+Enter starts a new line, and you get a few seconds to take a message back.
 - **Colours per person.** Give someone a theme and their conversation, and their row in the list, wears it.
-- **Pictures inline.** Photos show up right in the conversation: the real image in Kitty, Ghostty or WezTerm, and a braille sketch everywhere else.
+- **Pictures both ways.** Paste or pick a picture to send it. Photos you receive show up right in the conversation: the real image in Kitty, Ghostty or WezTerm, and a braille sketch everywhere else.
 - **Search everything** with `Ctrl+F`, including filters like `from:Sam` and `after:2026-08-01`.
 - **Offline is fine.** Browse, search and write while the phone is away; queue messages to go out when it comes back, or schedule them for later.
 - **An optional writing helper** that fixes spelling or rewrites a draft, with local models if you'd rather nothing leaves your machine. It never sends anything itself.
@@ -58,10 +58,19 @@ When you send, the message waits four seconds before it goes, and the status lin
 
 A few things worth knowing:
 
-- **"Submitted" isn't "delivered."** KDE Connect hands the message to your phone but never reports back whether it actually went out. TideSMS says *submitted* rather than pretending otherwise. If it matters, check the phone.
+- **Submitted, then sent.** A message shows *submitted* once KDE Connect has handed it to your phone, and *sent* once the phone reports it back from its own message list. Neither is a delivery receipt: SMS doesn't tell the phone whether it arrived. A message stuck on *submitted* is worth checking on the phone.
 - **Group chats are read-only.** You can read and search them, but KDE Connect's command line only sends to a single number, so replying to a group isn't possible.
-- **Sending pictures isn't supported.** Receiving them is.
 - If Ctrl+Enter or Shift+Enter don't seem to work, your terminal (or window manager) may be swallowing them. **F12** always sends, **Alt+Enter** always adds a new line, and `enter_sends = false` makes Enter a plain newline if you prefer that.
+
+### Sending pictures
+
+- **Paste one.** Copy a picture (a screenshot, or "Copy image" in a browser) and press **Ctrl+V** in the reply box. If the clipboard holds text too, Ctrl+V pastes the text as usual; **Ctrl+P → Paste picture from clipboard** takes the picture instead.
+- **Pick one.** **Alt+A** (or **Ctrl+P → Attach picture…**) lists your recent pictures from Pictures, Downloads, Desktop and Documents, newest first, with a small preview. Type to filter the list.
+- **Browse for one.** In the same picker, type a path starting with `~` or `/` (say `~/Pictures/`) to list that folder. **Tab** completes the highlighted entry, **Enter** on a folder opens it, and **Enter** on a picture attaches it.
+
+Attached pictures show above the reply box. **Backspace** in an empty reply box removes the last one. You can send a picture with or without text, up to five at a time. Large photos are scaled down to 1600 pixels before they go (with ImageMagick, if you have it), and your original file is never touched.
+
+Pictures go out as MMS, so they need the phone to be connected: they can't be queued or scheduled yet, and group chats are still read-only.
 
 ### Reading a conversation
 
@@ -122,12 +131,14 @@ You decide what's allowed per conversation: `local`, `cloud` or `disabled` (**Ct
 | | Enter | Message actions |
 | | y / r | Copy / reply |
 | | v / d | View / download a picture |
+| | Alt+A | Attach a picture |
 | | g / G | Oldest / newest |
 | | / then n / N | Search, next / previous match |
 | Reply box | Enter | Send |
 | | Shift+Enter or Alt+Enter | New line |
 | | Ctrl+Enter or F12 | Send (works everywhere) |
 | | Ctrl+Shift+Enter | Schedule |
+| | Ctrl+V | Paste text, or a picture if that's all the clipboard holds |
 | | Ctrl+G | Check spelling and grammar |
 | | Esc | Leave (Alt+Esc in Vim mode) |
 | Just sent | Esc / Enter | Undo / send now |
@@ -213,7 +224,7 @@ Everything stays on your machine unless you turn on a cloud AI provider. The dat
 
 ## How it works
 
-TideSMS reads conversations over KDE Connect's D-Bus interface, and sends through `kdeconnect-cli` with an argument list, never through a shell. Everything it shows comes from its own SQLite cache, so the interface never waits on the phone. Syncing picks up where it left off in each conversation rather than downloading everything again, and messages are matched carefully enough that syncing twice never duplicates one.
+TideSMS asks the KDE Connect daemon over D-Bus for your phones and conversations. Text goes out through `kdeconnect-cli` with an argument list, never through a shell; pictures go over D-Bus, because the CLI accepts `--attachment` and then quietly drops it. (If D-Bus can't be reached it falls back to `kdeconnect-cli` for the device list too, which works but is slower: that command spends two seconds looking for devices on the network every time.) Everything it shows comes from its own SQLite cache, so the interface never waits on the phone. Syncing picks up where it left off in each conversation rather than downloading everything again, and messages are matched carefully enough that syncing twice never duplicates one.
 
 Phones often write the same number several ways (`+18165550182`, `8165550182`). TideSMS treats those as one person when it's unambiguous. That's how a contact saved without a country code still gets their name on the thread, and how a one-person thread isn't mistaken for a group.
 

@@ -98,9 +98,16 @@ func (m *Model) prepareSend() bool {
 	if m.sending || !m.loaded {
 		return false
 	}
-	if strings.TrimSpace(m.editor.Value()) == "" {
+	pictures := m.attachments()
+	if strings.TrimSpace(m.editor.Value()) == "" && len(pictures) == 0 {
 		m.notify("Write a message before sending", true)
 		return false
+	}
+	if len(pictures) > 0 {
+		if d := m.currentDevice(); d != nil && d.SMSCapability == "available" && !d.Capabilities.SendMedia {
+			m.notify("This phone can't be sent pictures through KDE Connect", true)
+			return false
+		}
 	}
 	// A thread is only a real group when it has more than one distinct person.
 	// The same number spelled several ways is still one recipient.
@@ -140,6 +147,7 @@ func (m *Model) prepareSend() bool {
 		msg.ID = h.retryID
 		h.retryID = ""
 	}
+	msg.Attachments = outgoingParts(msg.ID, pictures)
 	phone := ""
 	if deduped := domain.DedupeParticipants(t.Participants); len(deduped) == 1 {
 		phone = deduped[0].Number
@@ -158,6 +166,12 @@ func (m *Model) deliverPending() tea.Cmd {
 		return nil
 	}
 	if !m.deviceOnline(p.msg.DeviceID) {
+		// The queue stores text only, so a picture waits for the phone instead.
+		if len(p.msg.Attachments) > 0 {
+			m.pending = nil
+			m.notify("Pictures can't be queued yet · send it when the phone is connected", true)
+			return nil
+		}
 		m.modal = "offline-send"
 		m.choice = 0
 		m.choices = []string{"Queue for later", "Keep draft", "Cancel"}
@@ -291,6 +305,10 @@ func (m *Model) resolveOfflineSend(choice string) tea.Cmd {
 
 // openSchedule offers the relative and custom schedule choices.
 func (m *Model) openSchedule() tea.Cmd {
+	if len(m.attachments()) > 0 {
+		m.notify("Pictures can't be scheduled yet · send it now, or remove the picture", true)
+		return nil
+	}
 	if !m.prepareSend() {
 		return nil
 	}

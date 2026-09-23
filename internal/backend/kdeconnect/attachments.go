@@ -36,7 +36,12 @@ func (c *Client) FetchAttachment(ctx context.Context, device string, partID int6
 		select {
 		case <-ctx.Done():
 			return "", errors.New("timed out waiting for the attachment")
-		case sig := <-ch:
+		case sig, ok := <-ch:
+			// The channel closes with the connection; a nil signal would
+			// otherwise be read as one.
+			if !ok || sig == nil {
+				return "", errors.New("KDE Connect disconnected while fetching the attachment")
+			}
 			if sig.Name != conversations+".attachmentReceived" || len(sig.Body) < 1 {
 				continue
 			}
