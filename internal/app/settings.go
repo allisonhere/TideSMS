@@ -45,8 +45,8 @@ var aiSettings = []settingsField{
 	{settingAIEnabled, "Enabled"},
 	{settingAIProvider, "Provider"},
 	{settingAIEndpoint, "Endpoint"},
-	{settingAIModel, "Model"},
 	{settingAIKey, "API key"},
+	{settingAIModel, "Model"},
 	{settingAIPolicy, "Default policy"},
 }
 
@@ -154,7 +154,7 @@ func (m *Model) selectedSetting() (settingsField, bool) {
 	return fields[m.choice], true
 }
 
-func (m *Model) openSettings() {
+func (m *Model) openSettings() tea.Cmd {
 	m.modal = "settings"
 	m.choice = 0
 	m.themeCursor = themeIndex(m.cfg.General.Theme)
@@ -171,6 +171,7 @@ func (m *Model) openSettings() {
 	}
 	m.aiPolicyCursor = policyIndex(policy)
 	m.settingEdit = false
+	return m.probeLocalProviders()
 }
 
 func themeIndex(name string) int {
@@ -289,9 +290,9 @@ func (m *Model) settingsValue(id settingID, selected bool) string {
 		return onOff(m.cfg.AI.Enabled)
 	case settingAIProvider:
 		if selected {
-			return string(ai.Providers[m.aiProviderCursor])
+			return m.providerLabel(ai.Providers[m.aiProviderCursor])
 		}
-		return orDash(m.cfg.AI.Provider)
+		return m.providerLabel(ai.Provider(m.cfg.AI.Provider))
 	case settingAIEndpoint:
 		if m.cfg.AI.Endpoint == "" {
 			// An empty endpoint is not unset so much as "whatever this provider
@@ -408,49 +409,17 @@ func (m *Model) settingsActivate() tea.Cmd {
 		return m.saveConfig(c)
 	case settingAIEnabled:
 		c := m.cfg
-		if c.AI.Enabled {
-			c.AI.Enabled = false
-			return m.saveConfig(c)
-		}
-		// Turning AI on with nothing behind it would leave every AI command
-		// failing. Pick the local provider, which needs no key and no network.
-		pickedProvider := false
-		if ai.Provider(c.AI.Provider) == ai.ProviderDisabled {
-			c.AI.Provider = string(ai.ProviderOllama)
-			m.aiProviderCursor = providerIndex(c.AI.Provider)
-			pickedProvider = true
-		}
-		// An enabled provider with no model is a configuration the loader
-		// rejects, so saving one here would lock the app out of its own config
-		// on the next start. Go and find the model instead of writing that.
-		if c.AI.Model == "" {
-			// The detour is remembered, so choosing a model finishes switching
-			// AI on rather than leaving the switch off and the reader on the
-			// model row, where Enter only reopens the picker.
-			m.enablingAI = true
-			m.notify("Choose a model first — an enabled provider needs one", true)
-			m.selectSettingRow(settingAIModel)
-			if !pickedProvider {
-				return m.chooseAIModel()
-			}
-			// The provider was only just chosen and is not in m.cfg yet, so the
-			// lookup has to wait for the save: it reads the configuration to
-			// know who to ask.
-			m.pendingModelLookup = true
-			return m.saveConfig(c)
-		}
-		c.AI.Enabled = true
+		c.AI.Enabled = !c.AI.Enabled
 		return m.saveConfig(c)
 	case settingAIProvider:
 		c := m.cfg
-		c.AI.Provider = string(ai.Providers[m.aiProviderCursor])
-		// A different provider is a different question, so an earlier refusal
-		// no longer applies.
+		provider := ai.Providers[m.aiProviderCursor]
+		if m.localProviderUnavailable(provider) {
+			m.notify(string(provider)+" is unavailable; choose another provider", true)
+			return nil
+		}
+		c = c.SwitchAIProvider(string(provider))
 		m.modelListFailed = ""
-		// An endpoint belongs to the provider that was chosen with it. Keeping
-		// one across a switch would point the new provider at the old one's
-		// address, so a default is restored instead.
-		c.AI.Endpoint = ""
 		if ai.Provider(c.AI.Provider) == ai.ProviderDisabled {
 			c.AI.Enabled = false
 		}
@@ -735,12 +704,9 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 	}
 	value := strings.TrimSpace(m.settingInput.Value())
 	id := m.settingEditing
-	// Committing nothing where nothing is what is already stored achieves
-	// nothing, and closing the editor on it is what left the reader pressing
-	// Enter against a row that only reopened. The editor stays open and says
-	// what it wants; Esc is how you leave.
+	// An empty, unchanged field is a cancelled edit, not a validation trap.
 	if id == settingAIModel && value == "" && m.cfg.AI.Model == "" {
-		m.notify("Type a model name and press Enter, or Esc to leave AI off", true)
+		m.cancelSettingEdit()
 		return nil
 	}
 	m.settingEdit = false
@@ -748,21 +714,15 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 	switch id {
 	case settingAIEndpoint:
 		c.AI.Endpoint = value
+		if c.AI.Provider == string(ai.ProviderOllama) {
+			c.AI.OllamaEndpoint = value
+		}
 	case settingAIModel:
 		c.AI.Model = value
-		// The loader refuses an enabled provider with no model, so clearing the
-		// model switches AI off rather than leaving a config that will not load.
-		if value == "" && c.AI.Enabled {
-			c.AI.Enabled = false
-			m.notify("AI switched off: an enabled provider needs a model", false)
-		}
-		if value == "" {
-			// Nothing was named, so there is no enable to finish.
-			m.enablingAI = false
-		}
-		c = m.finishEnabling(c)
 	case settingAIKey:
 		c.AI.APIKey = value
+		m.modelListFailed = ""
+		m.lookupAfterKey = value != "" && !ai.Provider(c.AI.Provider).Local() && ai.Provider(c.AI.Provider) != ai.ProviderDisabled
 	default:
 		return nil
 	}
@@ -771,13 +731,6 @@ func (m *Model) commitSettingEdit() tea.Cmd {
 
 func (m *Model) cancelSettingEdit() {
 	m.settingEdit = false
-	if m.enablingAI {
-		// The edit was the model an enable was waiting on; abandoning it
-		// abandons the enable rather than leaving it pending against a row the
-		// reader has walked away from.
-		m.enablingAI = false
-		m.notify("No model chosen, so AI stayed off", false)
-	}
 }
 
 // selectSettingRow moves the panel's cursor to a row by id, so a setting that
@@ -797,6 +750,14 @@ func (m *Model) settingsEditKey(k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "enter":
 		return m.commitSettingEdit()
+	case "tab", "shift+tab", "up", "down":
+		cmd := m.commitSettingEdit()
+		delta := 1
+		if k.String() == "up" || k.String() == "shift+tab" {
+			delta = -1
+		}
+		m.choice = cycleIndex(m.choice, delta, len(m.settingsFields()))
+		return cmd
 	case "esc":
 		m.cancelSettingEdit()
 		return nil
@@ -813,7 +774,7 @@ func (m *Model) settingsHint() string {
 		if m.settingEditing == settingAIKey {
 			return "Enter save · Esc cancel · the key is never shown"
 		}
-		return "Enter save · Esc cancel"
+		return "Enter save · Tab/↑↓ leave field · Esc cancel"
 	}
 	if f, ok := m.selectedSetting(); ok && textSetting(f.id) {
 		return "↑↓ move · Enter edit · Esc close"
@@ -826,8 +787,14 @@ func (m *Model) settingsHint() string {
 // privacy policy, which is not the setting at fault.
 func (m *Model) aiSettingsNotice() string {
 	provider := ai.Provider(m.cfg.AI.Provider)
-	if !m.cfg.AI.Enabled || provider == ai.ProviderDisabled {
-		return "AI is off: set AI enabled and a provider"
+	if !m.cfg.AI.Enabled {
+		return "AI is off"
+	}
+	if provider == ai.ProviderDisabled {
+		return "AI is on: choose a provider"
+	}
+	if m.localProviderUnavailable(provider) {
+		return "AI is on: " + string(provider) + " is unavailable; choose another provider"
 	}
 	policy := ai.Policy(m.cfg.AI.DefaultPolicy)
 	if policy == "" {

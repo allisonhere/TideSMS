@@ -302,7 +302,10 @@ func (m *Model) renderModal(r tideui.Renderer) tideui.Overlay {
 			if m.settingEdit && line.index == idx {
 				suffix = m.settingInput.View()
 			}
-			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: line.field.label, Suffix: suffix, Selected: line.index == idx}, w-4))
+			if line.field.id == settingAIProvider && strings.Contains(suffix, "(unavailable)") {
+				suffix = r.Styles.DetailMeta.Render(suffix)
+			}
+			rows = append(rows, r.RenderSoftRow(tideui.SoftRow{Text: line.field.label, Suffix: suffix, Selected: line.index == idx, Muted: line.field.id == settingAIProvider && strings.Contains(suffix, "(unavailable)")}, w-4))
 		}
 		if last < len(lines) {
 			rows = append(rows, r.Styles.DetailMeta.Render("↓ more"))

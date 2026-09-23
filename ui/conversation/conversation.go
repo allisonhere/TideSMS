@@ -10,6 +10,9 @@ import (
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"maps"
+	"os"
+	"reflect"
 	"strings"
 	"time"
 	"unicode"
@@ -50,21 +53,66 @@ type Options struct {
 	CellWidth, CellHeight int
 	Timestamps, Query     string
 }
+type mediaStamp struct {
+	path     string
+	size     int64
+	modified int64
+}
+
+type imageTransmission struct {
+	message int
+	data    string
+}
+
+type renderedMessage struct {
+	message       domain.Message
+	lines         []string
+	media         []mediaStamp
+	transmissions []string
+}
+
+func attachmentStamps(msg domain.Message, inline bool) []mediaStamp {
+	if !inline || len(msg.Attachments) == 0 {
+		return nil
+	}
+	stamps := make([]mediaStamp, 0, len(msg.Attachments))
+	for _, a := range msg.Attachments {
+		path, _ := a.Preview()
+		stamp := mediaStamp{path: path}
+		if info, err := os.Stat(path); err == nil {
+			stamp.size = info.Size()
+			stamp.modified = info.ModTime().UnixNano()
+		}
+		stamps = append(stamps, stamp)
+	}
+	return stamps
+}
+
 type Model struct {
 	Messages                        []domain.Message
 	Selected, Offset, Width, Height int
 	Follow                          bool
 	lines                           []string
 	starts, ends                    []int
-	transmissions                   []string
+	transmissions                   []imageTransmission
 	Options                         Options
+	cache                           map[string]renderedMessage
+	cacheRenderer                   tideui.Renderer
 }
 
 // Transmissions returns the graphics escapes for the images the last Layout
 // placed. They carry no width and must be written outside the pane, ahead of
 // the frame: a pane pads and truncates its content, and an image has to reach
 // the terminal whole.
-func (m *Model) Transmissions() string { return strings.Join(m.transmissions, "") }
+func (m *Model) Transmissions() string {
+	var out strings.Builder
+	for _, tx := range m.transmissions {
+		if tx.message < len(m.starts) && m.ends[tx.message] > m.Offset && m.starts[tx.message] < m.Offset+m.Height {
+			out.WriteString(tx.data)
+		}
+	}
+	return out.String()
+}
 
 // Cells reserved around every bubble: the selection marker View prepends, the
 // "│ " gutter, and a margin that keeps text off the pane border.
@@ -172,9 +220,17 @@ func Safe(s string) string {
 	}, s)
 }
 func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
+	cache := m.cache
+	if m.Width != max(1, w) || !reflect.DeepEqual(m.Options, opts) || !reflect.DeepEqual(m.cacheRenderer, r) {
+		cache = nil
+	}
+	// Replace rather than mutate: saved conversation views can share old caches.
+	m.cache = make(map[string]renderedMessage, len(m.Messages))
+	m.cacheRenderer = r
 	m.Width = max(1, w)
 	m.Height = max(1, h)
 	m.Options = opts
+	m.Options.Names = maps.Clone(opts.Names)
 	m.lines = nil
 	m.starts = nil
 	m.ends = nil
@@ -195,6 +251,21 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		if msg.Unread && !boundary {
 			m.lines = append(m.lines, r.Styles.Badge.Render("── Unread messages ──"))
 			boundary = true
+		}
+		// Headers depend on neighbouring messages; the bubble itself does not.
+		// File metadata invalidates image caches when downloads arrive or change.
+		bodyStart := len(m.lines)
+		transmissionStart := len(m.transmissions)
+		stamps := attachmentStamps(msg, opts.InlineMedia)
+		if cached, ok := cache[msg.ID]; ok && reflect.DeepEqual(cached.media, stamps) && reflect.DeepEqual(cached.message, msg) {
+			m.lines = append(m.lines, cached.lines...)
+			for _, tx := range cached.transmissions {
+				m.transmissions = append(m.transmissions, imageTransmission{message: len(m.starts), data: tx})
+			}
+			m.starts = append(m.starts, start)
+			m.ends = append(m.ends, len(m.lines))
+			m.cache[msg.ID] = cached
+			continue
 		}
 		sender := senderName(msg, opts.Names)
 		stamp := msg.Timestamp.Local().Format("15:04")
@@ -246,7 +317,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 				// way v opens the full-screen view for a closer look.
 				if opts.Graphics {
 					if transmit, lines, ok := placeImage(image, bw, opts); ok {
-						m.transmissions = append(m.transmissions, transmit)
+						m.transmissions = append(m.transmissions, imageTransmission{message: len(m.starts), data: transmit})
 						wrapped = append(wrapped, lines...)
 						continue
 					}
@@ -350,6 +421,14 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			m.lines = append(m.lines, pad+statusPad+r.Styles.DetailMeta.Render(string(msg.Status)))
 		}
 		m.lines = append(m.lines, "")
+		if msg.ID != "" {
+			entry := renderedMessage{message: msg, lines: append([]string(nil), m.lines[bodyStart:]...), media: stamps}
+			entry.message.Attachments = append([]domain.Attachment(nil), msg.Attachments...)
+			for _, tx := range m.transmissions[transmissionStart:] {
+				entry.transmissions = append(entry.transmissions, tx.data)
+			}
+			m.cache[msg.ID] = entry
+		}
 		m.starts = append(m.starts, start)
 		m.ends = append(m.ends, len(m.lines))
 	}

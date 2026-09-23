@@ -10,6 +10,13 @@ import (
 	"path/filepath"
 )
 
+// AIProviderSettings keeps credentials and model selection scoped to a provider.
+type AIProviderSettings struct {
+	Endpoint string `toml:"endpoint"`
+	Model    string `toml:"model"`
+	APIKey   string `toml:"api_key"`
+}
+
 type Config struct {
 	Sync struct {
 		InitialMessages int `toml:"initial_messages"`
@@ -62,11 +69,13 @@ type Config struct {
 		// Provider is one of the values in ai.Providers (ollama, lmstudio, openai,
 		// anthropic, deepseek, custom-openai-compatible). "disabled" keeps the
 		// writer unavailable without discarding the rest of the settings.
-		Provider string `toml:"provider"`
-		Endpoint string `toml:"endpoint"`
-		Model    string `toml:"model"`
+		Provider       string `toml:"provider"`
+		Endpoint       string `toml:"endpoint"`
+		OllamaEndpoint string `toml:"ollama_endpoint,omitempty"`
+		Model          string `toml:"model"`
 		// APIKey is only needed by cloud providers. It is never logged.
-		APIKey string `toml:"api_key"`
+		APIKey    string                        `toml:"api_key"`
+		Providers map[string]AIProviderSettings `toml:"providers,omitempty"`
 		// DefaultPolicy is the privacy default for threads without an override:
 		// "local", "cloud" or "disabled".
 		DefaultPolicy string `toml:"default_policy"`
@@ -146,9 +155,6 @@ func Load(path string) (Config, error) {
 	if !ai.ValidPolicy(c.AI.DefaultPolicy) {
 		return Default(), fmt.Errorf("ai default_policy must be local, cloud or disabled")
 	}
-	if c.AI.Enabled && c.AI.Provider != string(ai.ProviderDisabled) && c.AI.Model == "" {
-		return Default(), fmt.Errorf("ai model must be set when a provider is enabled")
-	}
 	if c.Queue.MaxAttempts < 1 || c.Queue.MaxAttempts > 50 {
 		return Default(), fmt.Errorf("queue max_attempts must be between 1 and 50")
 	}
@@ -191,4 +197,28 @@ func DefaultPaths() Paths {
 		return filepath.Join(home, fallback)
 	}
 	return Paths{filepath.Join(root("XDG_CONFIG_HOME", ".config"), "tidesms/config.toml"), filepath.Join(root("XDG_DATA_HOME", ".local/share"), "tidesms/state.db"), filepath.Join(root("XDG_STATE_HOME", ".local/state"), "tidesms/tidesms.log")}
+}
+
+// SwitchAIProvider snapshots the outgoing provider before restoring the new one.
+// Copy the map because UI config changes are not applied until saving succeeds.
+// Legacy configs keep their active provider in the existing flat fields.
+func (c Config) SwitchAIProvider(provider string) Config {
+	if provider == c.AI.Provider {
+		return c
+	}
+	profiles := make(map[string]AIProviderSettings, len(c.AI.Providers)+1)
+	for name, profile := range c.AI.Providers {
+		profiles[name] = profile
+	}
+	if c.AI.Provider != "" && c.AI.Provider != string(ai.ProviderDisabled) {
+		profiles[c.AI.Provider] = AIProviderSettings{Endpoint: c.AI.Endpoint, Model: c.AI.Model, APIKey: c.AI.APIKey}
+	}
+	profile, exists := profiles[provider]
+	if !exists && provider == string(ai.ProviderOllama) {
+		profile.Endpoint = c.AI.OllamaEndpoint
+	}
+	c.AI.Providers = profiles
+	c.AI.Provider = provider
+	c.AI.Endpoint, c.AI.Model, c.AI.APIKey = profile.Endpoint, profile.Model, profile.APIKey
+	return c
 }

@@ -6,6 +6,7 @@ import (
 	aifake "github.com/allisonhere/tidesms/internal/ai/fake"
 	"github.com/allisonhere/tidesms/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
+	"strings"
 	"testing"
 )
 
@@ -172,4 +173,98 @@ func TestCtrlGOpensReview(t *testing.T) {
 func pressReview(m *Model, key string) {
 	k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	m.modalKey(k)
+}
+
+func TestAICompletionReplacesPendingStatusAfterReviewCloses(t *testing.T) {
+	for _, action := range []string{"AI: Review writing", "AI: Make clearer"} {
+		for _, closeKey := range []string{"esc", "A"} {
+			t.Run(action+"/"+closeKey, func(t *testing.T) {
+				a := &aifake.Assistant{
+					ReviewResult:  ai.ReviewResult{Changes: []ai.Change{{Original: "teh", Suggested: "the", Start: 0, End: 3}}},
+					RewriteResult: ai.RewriteResult{Text: "the cat"},
+				}
+				m, _ := aiFixture(t, a)
+				cmd := m.action(action)
+				if cmd == nil || !m.aiBusy || !strings.Contains(m.notice, "Asking") {
+					t.Fatal("request did not start")
+				}
+				m.Update(cmd())
+				if m.aiBusy || m.aiCancel != nil || m.notice != "AI suggestions ready" {
+					t.Fatalf("completion left stale state: %q", m.notice)
+				}
+				if closeKey == "esc" {
+					m.modalKey(tea.KeyMsg{Type: tea.KeyEsc})
+				} else {
+					pressReview(m, closeKey)
+				}
+				if m.modal != "" || strings.Contains(m.View(), "Asking the assistant") {
+					t.Fatal("pending status survived closing review")
+				}
+			})
+		}
+	}
+}
+
+func TestAICancelImmediatelyClearsBusyAndIgnoresLateResult(t *testing.T) {
+	a := &aifake.Assistant{ReviewResult: ai.ReviewResult{Changes: []ai.Change{{Original: "teh", Suggested: "the", Start: 0, End: 3}}}}
+	m, _ := aiFixture(t, a)
+	cmd := m.startAI("review", "")
+	m.cancelAI()
+	if m.aiBusy || m.aiCancel != nil || m.notice != "AI cancelled" {
+		t.Fatal("cancellation left pending status")
+	}
+	// Simulate an assistant that returns success despite cancellation.
+	m.Update(cmd())
+	if m.modal != "" || m.notice != "AI cancelled" || m.editor.Value() != "teh cat" {
+		t.Fatal("late result revived cancelled request")
+	}
+}
+
+func TestPolishWritingPreviewAcceptRejectAndUndo(t *testing.T) {
+	const polished = "The cat is here."
+	for _, accept := range []bool{false, true} {
+		a := &aifake.Assistant{RewriteResult: ai.RewriteResult{Text: polished}}
+		m, _ := aiFixture(t, a)
+		found := false
+		for _, name := range commands {
+			if name == "AI: Polish writing" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("polish missing from palette")
+		}
+		runAIAction(t, m, "AI: Polish writing")
+		if len(a.RewriteCalls) != 1 || !strings.Contains(a.RewriteCalls[0].Instruction, "spelling, grammar") {
+			t.Fatal("polish instruction not sent")
+		}
+		if m.modal != "ai-review" || m.editor.Value() != "teh cat" {
+			t.Fatal("polish bypassed preview")
+		}
+		if accept {
+			pressReview(m, "a")
+			if m.editor.Value() != polished {
+				t.Fatal("accept did not apply polish")
+			}
+			if !m.editor.Undo() || m.editor.Value() != "teh cat" {
+				t.Fatal("polish could not be undone")
+			}
+		} else {
+			pressReview(m, "r")
+			if m.editor.Value() != "teh cat" {
+				t.Fatal("reject applied polish")
+			}
+		}
+	}
+}
+
+func TestPolishDiscardsResultAfterDraftChanges(t *testing.T) {
+	a := &aifake.Assistant{RewriteResult: ai.RewriteResult{Text: "The cat."}}
+	m, _ := aiFixture(t, a)
+	cmd := m.action("AI: Polish writing")
+	m.editor.SetValue("new draft")
+	m.Update(cmd())
+	if m.modal != "" || m.editor.Value() != "new draft" || !strings.Contains(m.notice, "discarded") {
+		t.Fatal("stale polish result was offered")
+	}
 }

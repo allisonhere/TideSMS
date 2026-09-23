@@ -44,6 +44,7 @@ type AIInstruction struct {
 var AIInstructions = []AIInstruction{
 	{"AI: Fix spelling", "Correct spelling mistakes only. Leave grammar, wording and punctuation as they are."},
 	{"AI: Fix grammar", "Correct grammar mistakes only. Leave spelling and wording as they are."},
+	{"AI: Polish writing", "Fix spelling, grammar, punctuation and capitalization, and rewrite awkward sentences for clear, natural flow. Preserve the writer's meaning, facts, tone and level of formality. Do not add information or answer the message. Keep it suitable for a text message."},
 	{"AI: Clean up", "Fix spelling, grammar, punctuation and capitalization. Change as little as possible."},
 	{"AI: Make shorter", "Rewrite more concisely while keeping the meaning."},
 	{"AI: Make friendlier", "Rewrite in a warmer, friendlier tone."},
@@ -169,6 +170,11 @@ func (m *Model) cancelAI() {
 		m.aiCancel()
 		m.aiCancel = nil
 	}
+	if m.aiBusy {
+		m.aiBusy = false
+		m.aiEpoch++ // Ignore results that arrive after cancellation.
+		m.notify("AI cancelled", false)
+	}
 }
 
 // startAI runs a review or rewrite off the event loop. The draft is never sent
@@ -183,7 +189,7 @@ func (m *Model) startAI(kind, instruction string) tea.Cmd {
 	// fall out of the local-only branch and blame the privacy policy for a
 	// missing configuration.
 	provider := ai.Provider(m.cfg.AI.Provider)
-	if m.assistant == nil || !m.cfg.AI.Enabled || provider == ai.ProviderDisabled {
+	if m.assistant == nil || !m.cfg.AI.Enabled || provider == ai.ProviderDisabled || strings.TrimSpace(m.cfg.AI.Model) == "" {
 		m.notify("AI is not configured — Ctrl+P → Open settings", true)
 		return nil
 	}
@@ -218,6 +224,7 @@ func (m *Model) startAI(kind, instruction string) tea.Cmd {
 	m.notify("Asking the assistant…", false)
 
 	return func() tea.Msg {
+		defer cancel()
 		if kind == "review" {
 			res, err := assistant.Review(ctx, ai.ReviewRequest{Text: target, Policy: policy})
 			return aiResultMsg{epoch: epoch, kind: kind, original: target, changes: res.Changes, err: err}
@@ -237,7 +244,10 @@ func (m *Model) handleAIResult(v aiResultMsg) {
 		return
 	}
 	m.aiBusy = false
-	m.aiCancel = nil
+	if m.aiCancel != nil {
+		m.aiCancel()
+		m.aiCancel = nil
+	}
 	if v.err != nil {
 		if errors.Is(v.err, context.Canceled) {
 			m.notify("AI cancelled", false)
@@ -249,7 +259,7 @@ func (m *Model) handleAIResult(v aiResultMsg) {
 	}
 	// If the draft changed while the request was in flight, the offsets no
 	// longer describe it, so the suggestion is dropped rather than misapplied.
-	if v.kind == "review" && m.editor.Value() != v.original {
+	if (v.kind == "review" || (v.kind == "rewrite" && !v.selection)) && m.editor.Value() != v.original {
 		m.notify("Draft changed; AI suggestion discarded", true)
 		return
 	}
@@ -264,6 +274,7 @@ func (m *Model) handleAIResult(v aiResultMsg) {
 	m.review = aiReviewState{kind: v.kind, selection: v.selection, original: v.original, changes: v.changes, accepted: make([]bool, len(v.changes))}
 	m.choice = 0
 	m.modal = "ai-review"
+	m.notify("AI suggestions ready", false)
 	m.setReviewMarkers()
 }
 
@@ -290,10 +301,14 @@ func (m *Model) applyReview() {
 		return
 	}
 	if r.kind == "rewrite" {
+		text := r.original
+		if len(r.accepted) > 0 && r.accepted[0] {
+			text = r.changes[0].Suggested
+		}
 		if r.selection {
-			m.editor.ApplySelection(r.changes[0].Suggested)
+			m.editor.ApplySelection(text)
 		} else {
-			m.editor.ApplyAll(r.changes[0].Suggested)
+			m.editor.ApplyAll(text)
 		}
 		return
 	}

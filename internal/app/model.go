@@ -84,10 +84,12 @@ type Model struct {
 	// themeCursor, contactCursor and the bubble cursors hold the value
 	// highlighted in the static settings panel before it is committed, so the
 	// theme previews live.
-	themeCursor      int
-	contactCursor    int
-	aiProviderCursor int
-	aiPolicyCursor   int
+	themeCursor         int
+	contactCursor       int
+	aiProviderCursor    int
+	aiPolicyCursor      int
+	localProviderStatus map[ai.Provider]localProviderStatus
+	lookupAfterKey      bool
 	// settingEdit is the settings panel's inline text editor, used by the rows
 	// that are typed rather than cycled.
 	settingEdit            bool
@@ -122,12 +124,6 @@ type Model struct {
 	// previewAfterFetch is the attachment id v is waiting on, so the viewer
 	// opens by itself once the real file has been downloaded.
 	previewAfterFetch string
-	// pendingModelLookup defers a model listing until the configuration it
-	// depends on has been saved and applied.
-	pendingModelLookup bool
-	// enablingAI records that the reader asked to switch AI on and is only
-	// being asked for a model on the way, so choosing one finishes the job.
-	enablingAI bool
 	// settingsRow is the panel's cursor while a picker opened from it borrows
 	// m.choice, so leaving the picker returns to the row it was opened from.
 	settingsRow int
@@ -680,9 +676,14 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 			m.logError("save draft", v.err)
 		}
 		return m, nil
+	case localProvidersMsg:
+		m.localProviderStatus = v
+		return m, nil
 	case aiModelsMsg:
 		return m, m.applyAIModels(v)
 	case configMsg:
+		lookupAfterKey := m.lookupAfterKey
+		m.lookupAfterKey = false
 		m.busy = false
 		if v.err != nil {
 			m.notify("Could not save configuration; change was not applied", true)
@@ -706,14 +707,11 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(m.startSession(true), m.loadCache())
 			}
 			m.layoutConversation()
-			if m.pendingModelLookup {
-				// A provider chosen a moment ago is only now in m.cfg, and the
-				// model lookup reads the configuration to know who to ask.
-				m.pendingModelLookup = false
+			if lookupAfterKey && m.modal == "settings" {
+				m.selectSettingRow(settingAIModel)
 				return m, m.chooseAIModel()
 			}
 		}
-		m.pendingModelLookup = false
 		return m, nil
 	case mutationMsg:
 		m.busy = false
@@ -826,8 +824,7 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		// terminal's own meanings, unlike Ctrl+S, which many still read as flow
 		// control.
 		if v.String() == "ctrl+o" {
-			m.openSettings()
-			return m, nil
+			return m, m.openSettings()
 		}
 		// Enter submits from the composer (below); Ctrl+Enter and F12 are the
 		// explicit keys that work from any pane and whatever the terminal

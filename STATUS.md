@@ -3,6 +3,24 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## History rendering performance
+
+Conversation layouts reuse unchanged text and image bubbles when older pages arrive. Width, theme, search, sender names, message changes, and attachment file changes invalidate cached output. Graphics transmissions are limited to visible messages. A 1,000-message text re-layout benchmark fell from roughly 28 ms to 1.1 ms on this machine.
+
+## AI polish
+
+**AI: Polish writing** combines spelling and grammar correction with sentence rewriting. It uses the existing preview, accept/reject, and undo flow. Rejecting a rewrite now preserves the original, and whole-draft rewrites are discarded if the draft changed while waiting.
+
+## AI request status
+
+Completed reviews and rewrites replace the pending status with “AI suggestions ready.” Cancelling clears the busy state immediately and ignores late responses, so “Asking the assistant” cannot remain after either transition.
+
+## AI settings fix
+
+API keys, endpoints, and model selections are saved separately for each provider. Switching providers restores that provider’s setup, including after restarting; existing flat AI settings are retained for the currently selected provider.
+
+The AI toggle saves independently of provider availability or model setup and never selects Ollama automatically. A saved `ai.ollama_endpoint` is used for Ollama availability and restored when switching back from a cloud provider. Settings checks local providers in the background and marks unavailable choices grey with an explicit label; unavailable choices cannot be selected. API key precedes Model, and saving a nonempty cloud key requests the provider’s model list without message text. Writing privacy policy still applies to AI requests; it does not block explicit catalogue setup. Re-saving a key retries failed lookup, and rejected keys return to the API key row. Incomplete AI setup remains loadable, and AI actions explain missing configuration. Empty model edits close with Enter; Tab and arrows leave typed fields.
+
 ## Milestone 1 implementation
 
 Implemented: two-pane TideUI shell; Ripple normal/Vim editing; clipboard integration; modified Enter support plus F12/palette fallback; contact add/edit/delete/search; manual recipients; automatic/explicit per-contact accents; global settings; paired-device discovery and selection; optional SMS plugin probe; async CLI submission; connection/send/error feedback; SQLite migrations and revision-protected per-recipient drafts; TOML persistence; private structured logs.

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func TestConfigRoundTripAndMalformedPreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(p)
-	if err != nil || got != c {
+	if err != nil || !reflect.DeepEqual(got, c) {
 		t.Fatalf("%+v %v", got, err)
 	}
 	bad := []byte("[composer\nmode=oops")
@@ -28,7 +29,7 @@ func TestConfigRoundTripAndMalformedPreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = Load(p)
-	if err == nil || got != Default() {
+	if err == nil || !reflect.DeepEqual(got, Default()) {
 		t.Fatal("expected safe defaults and error")
 	}
 	b, _ := os.ReadFile(p)
@@ -58,10 +59,9 @@ func TestAIDefaultsAreLocalAndOff(t *testing.T) {
 
 func TestInvalidAISettingsRejected(t *testing.T) {
 	for name, mutate := range map[string]func(*Config){
-		"provider":     func(c *Config) { c.AI.Provider = "gpt" },
-		"policy":       func(c *Config) { c.AI.DefaultPolicy = "maybe" },
-		"missingmodel": func(c *Config) { c.AI.Enabled = true; c.AI.Provider = "ollama"; c.AI.Model = "" },
-		"attempts":     func(c *Config) { c.Queue.MaxAttempts = 0 },
+		"provider": func(c *Config) { c.AI.Provider = "gpt" },
+		"policy":   func(c *Config) { c.AI.DefaultPolicy = "maybe" },
+		"attempts": func(c *Config) { c.Queue.MaxAttempts = 0 },
 	} {
 		p := filepath.Join(t.TempDir(), "config.toml")
 		c := Default()
@@ -109,7 +109,49 @@ func TestLocalProviderWithModelRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(p)
-	if err != nil || got.AI != c.AI {
+	if err != nil || !reflect.DeepEqual(got.AI, c.AI) {
 		t.Fatalf("ai = %+v err=%v", got.AI, err)
+	}
+}
+
+func TestProviderProfilesPersistAcrossSwitchAndRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	c := Default()
+	c.AI.Provider = "deepseek"
+	c.AI.APIKey = "deepseek-test-secret"
+	c.AI.Model = "deepseek-model"
+	c.AI.Endpoint = "https://deepseek.example/v1"
+	c = c.SwitchAIProvider("openai")
+	if c.AI.APIKey != "" || c.AI.Model != "" || c.AI.Endpoint != "" {
+		t.Fatal("new provider inherited another provider's settings")
+	}
+	c.AI.APIKey = "openai-test-secret"
+	c.AI.Model = "openai-model"
+	c.AI.Endpoint = "https://openai.example/v1"
+	for _, provider := range []string{"deepseek", "openai", "disabled", "deepseek", "openai"} {
+		c = c.SwitchAIProvider(provider)
+		if err := Save(path, c); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		c, err = Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if provider != "disabled" && (c.AI.APIKey != provider+"-test-secret" || c.AI.Model != provider+"-model" || c.AI.Endpoint != "https://"+provider+".example/v1") {
+			t.Fatal("provider settings not restored after reload")
+		}
+	}
+	// Clearing a key must remain cleared, rather than resurrecting the saved copy.
+	c.AI.APIKey = ""
+	c = c.SwitchAIProvider("deepseek").SwitchAIProvider("openai")
+	if c.AI.APIKey != "" {
+		t.Fatal("cleared key was restored")
+	}
+	before := c.AI.Providers["openai"]
+	c.AI.APIKey = "replacement"
+	_ = c.SwitchAIProvider("deepseek")
+	if c.AI.Providers["openai"] != before {
+		t.Fatal("switch mutated original config before save")
 	}
 }

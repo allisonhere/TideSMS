@@ -120,7 +120,8 @@ By default **Enter submits** and **Shift+Enter inserts a newline**, as a phone m
 The assistant is a reviewer, not a chat pane. It helps you write the message you already intend to send, and it never sends, chooses a recipient, or edits the draft silently.
 
 - **Ctrl+G** (or **Ctrl+P → AI: Review writing**) asks for spelling, grammar and punctuation corrections. Proposed changes open in a review modal: **a** Accept, **r** Reject, **e** Edit suggestion, **n**/**p** Next/Previous, **A** Accept all, **Esc** Close. Each change is shown individually, so a small correction reads as `their → there`.
-- Rewrite actions — **AI: Fix spelling**, **Fix grammar**, **Clean up**, **Make shorter**, **Make friendlier**, **Make professional**, **Make clearer** and **Custom rewrite…** — run against a Ripple selection when there is one, otherwise the whole draft.
+- **Ctrl+P → AI: Polish writing** fixes spelling and grammar while rewriting awkward sentences for natural flow, preserving your meaning and tone. Preview the rewrite, then accept or reject it.
+- Rewrite actions — **AI: Fix spelling**, **Fix grammar**, **Clean up**, **Polish writing**, **Make shorter**, **Make friendlier**, **Make professional**, **Make clearer** and **Custom rewrite…** — run against a Ripple selection when there is one, otherwise the whole draft.
 - Accepting a change replaces the text through Ripple's own edit path, so one undo (Vim `u`, or Ctrl+Z) restores exactly what was there before.
 - While a review is open, suggested spans are marked in the composer with an accent underline. Set `inline_marks = false` in `[ai]` (or leave it) to turn the marks off.
 - If the provider is unreachable, times out, or returns something malformed, the draft is left untouched and a notice says so. A request in flight is cancelled by starting another or leaving.
