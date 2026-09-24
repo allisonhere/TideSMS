@@ -74,7 +74,7 @@ func TestSettingsRowsSitUnderTheirHeading(t *testing.T) {
 	if assistant < 0 || sending < 0 || provider < 0 || background < 0 {
 		t.Fatalf("panel is missing its groups:\n%s", view)
 	}
-	if !(assistant < provider && provider < sending && sending < background) {
+	if assistant >= provider || provider >= sending || sending >= background {
 		t.Errorf("rows are not under their own headings:\n%s", view)
 	}
 }

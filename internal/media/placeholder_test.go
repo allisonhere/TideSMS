@@ -199,7 +199,8 @@ func TestImageIDIsStableAndNeverZero(t *testing.T) {
 	path := sizedPNG(t, 40, 20)
 	// A stable id is what lets a frame reuse an image the terminal already
 	// holds instead of retransmitting it.
-	if imageID(path, 10, 5) != imageID(path, 10, 5) {
+	first, second := imageID(path, 10, 5), imageID(path, 10, 5)
+	if first != second {
 		t.Error("the same image at the same size changed id between calls")
 	}
 	if imageID(path, 10, 5) == imageID(path, 11, 5) {

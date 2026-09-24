@@ -80,16 +80,6 @@ func thumbFile(a domain.Attachment) string {
 	return ""
 }
 
-// previewFile returns the best image on disk and whether it is the real part.
-// The conversation draws whatever this gives it so a message shows something
-// straight away, while the caller can still tell a preview from the image.
-func previewFile(a domain.Attachment) (string, bool) {
-	if p := localFile(a); p != "" {
-		return p, true
-	}
-	return thumbFile(a), false
-}
-
 func (m *Model) currentAttachment() (domain.Attachment, bool) {
 	if m.mediaIndex < 0 || m.mediaIndex >= len(m.mediaAtts) {
 		return domain.Attachment{}, false
