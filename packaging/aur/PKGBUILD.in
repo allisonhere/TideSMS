@@ -1,0 +1,55 @@
+# Maintainer: Allie Bayless <drbayless@gmail.com>
+#
+# Generated from packaging/aur/PKGBUILD.in by packaging/aur/render-pkgbuild.sh.
+# Edit the template in the TideSMS repository, not this file.
+
+pkgname=tidesms-bin
+pkgver=@PKGVER@
+pkgrel=@PKGREL@
+pkgdesc="Keyboard-first terminal SMS client for your Android phone, over KDE Connect"
+arch=('x86_64' 'aarch64')
+url="https://github.com/allisonhere/TideSMS"
+license=('MIT')
+provides=("tidesms=$pkgver")
+conflicts=('tidesms')
+depends=('kdeconnect')
+optdepends=(
+  'wl-clipboard: clipboard, and pasting pictures, on Wayland'
+  'xclip: clipboard on X11'
+  'imagemagick: shrink large photos before sending, and show HEIC pictures'
+  'libheif: show HEIC pictures without ImageMagick'
+)
+# Upstream ships a static, already-stripped binary; re-stripping it only
+# produces an empty debug package.
+options=('!strip' '!debug')
+
+source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
+source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/tidesms-linux-x86_64.tar.gz")
+source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/tidesms-linux-aarch64.tar.gz")
+sha256sums=('@SHA256_LICENSE@')
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
+
+package() {
+  install -Dm755 "$srcdir/tidesms-linux-$CARCH" "$pkgdir/usr/bin/tidesms"
+  install -Dm755 "$srcdir/tidesms-daemon-linux-$CARCH" "$pkgdir/usr/bin/tidesms-daemon"
+  install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # The background sender, as a user unit that is never enabled for you:
+  #   systemctl --user enable --now tidesms.service
+  install -d "$pkgdir/usr/lib/systemd/user"
+  cat > "$pkgdir/usr/lib/systemd/user/tidesms.service" <<'UNIT'
+[Unit]
+Description=TideSMS background sender
+Documentation=https://github.com/allisonhere/TideSMS
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tidesms-daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+}

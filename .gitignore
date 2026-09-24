@@ -5,3 +5,6 @@
 *.db-wal
 *.log
 /coverage.out
+
+# Local release builds (deploy.sh)
+dist/

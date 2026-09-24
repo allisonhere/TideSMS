@@ -277,6 +277,16 @@ python3 scripts/screenshot.py  # regenerate docs/screenshot.png from the demo
 contrib/tidedeck/run.sh render # what the TideDeck panel prints
 ```
 
+### Releasing
+
+```sh
+./deploy.sh --check     # what a release still needs, without a terminal UI
+./deploy.sh --dry-run   # rehearse a whole release; nothing is committed or pushed
+./deploy.sh             # the release console
+```
+
+The console bumps the version, runs the tests, lint and a build, commits, pushes the tag (which makes `.github/workflows/release.yml` build and publish the release), waits for the release files, and publishes `tidesms-bin` to the AUR from their published checksums. It is the same console every Tide app uses; this app's details are in `deploy.conf`, and the AUR packaging is in `packaging/aur`.
+
 The tests drive the real app through a fake backend, so none of them need a phone. There's one opt-in test against a real device, and it only reads:
 
 ```sh

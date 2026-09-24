@@ -3,6 +3,12 @@
 Milestone 1 is implemented and its live SMS test passed on 2026-09-22.
 Milestone 2 is implemented and verified against fixtures; its live phone test is still outstanding.
 
+## Releases
+
+`deploy.sh` is the Tide release console, shared byte-for-byte with tide, tidemail, tideftp and tidedeck (2.0.0); `deploy.conf` holds TideSMS's details. Added for it: an MIT `LICENSE`, `.github/workflows/release.yml` (tests, then one tarball per target holding both binaries, and `SHA256SUMS`), and `packaging/aur` for `tidesms-bin`, which installs both binaries and a user unit for the daemon at `/usr/bin`.
+
+Verified: `./deploy.sh --check`; the workflow's build step run locally, its PKGBUILD rendered from those checksums and built by `makepkg` into a package whose binaries report the stamped version; and a full release driven in a pseudo-terminal in dry-run mode through all ten steps. That run stopped at lint on four long-standing golangci-lint findings, which are now fixed (0 issues). Nothing has been released.
+
 ## An API, and a TideDeck panel
 
 `tidesms api threads|messages|send|read` prints JSON for other programs, from the same cache the app renders and through the same send path (`internal/api`). `tidesms reply ID` is a small full-screen reply window (`internal/reply`) sharing the app's drafts and undo window; `tidesms --open ID` starts the app on a conversation, waiting for a filled cache before giving up on it. `api threads --format tidedeck` prints a TideDeck document in the mail panel's shape: a block per conversation carrying its id, bright when unread, with the unread total as the badge.
