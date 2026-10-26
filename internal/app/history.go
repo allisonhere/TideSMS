@@ -168,6 +168,18 @@ func (m *Model) cyclePane(back bool) {
 	}
 }
 
+// stepPane moves focus one pane left or right: from the history to the
+// sidebar, or from the sidebar to the history. Opening the history with no
+// conversation chosen is refused by focusArea, which says why.
+func (m *Model) stepPane(left bool) {
+	switch {
+	case left && m.history.pane == paneConversation:
+		m.setPane(m.sidebarPane())
+	case !left && (m.history.pane == paneThreads || m.history.pane == paneContacts):
+		m.focusArea(paneConversation)
+	}
+}
+
 func (m *Model) sidebarPane() int {
 	if m.history.sidebarPane == paneContacts {
 		return paneContacts
@@ -353,7 +365,7 @@ func (m *Model) layoutConversation() {
 		}
 	}
 	conv := m.conversationTheme()
-	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)-attachLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery, Group: m.history.active != nil && m.history.active.IsGroup})
+	m.history.view.Layout(tideui.NewRenderer(conv, styleOptions), max(1, right-2), max(1, body-eh-6-noticeLines(m)-attachLines(m)-bannerLines(m)), conversation.Options{Dates: m.cfg.Conversation.ShowDateSeparators, MaxWidth: m.cfg.Conversation.MaxWidth, Bubbles: m.cfg.Conversation.Bubbles, Corners: m.cfg.Conversation.Corners, Fill: m.cfg.Conversation.FillBubbles, Incoming: m.bubblePalette(conv, false), Outgoing: m.bubblePalette(conv, true), Names: names, InlineMedia: m.cfg.Conversation.InlineMedia, Graphics: m.inlineGraphics(), CellWidth: m.cellW, CellHeight: m.cellH, HighlightID: m.history.highlightID, Timestamps: m.cfg.Conversation.Timestamps, Query: m.history.searchQuery, Group: m.history.active != nil && m.history.active.IsGroup})
 }
 
 // composerNotice says why sending is unavailable, and is absent otherwise. The
@@ -365,6 +377,23 @@ func (m *Model) composerNotice() string {
 	}
 	return ""
 }
+// phoneBanner explains, above the conversation, why sending is not happening:
+// the phone is chosen but KDE Connect cannot reach it. Without it a message
+// waiting in the outbox looks stuck rather than held.
+func (m *Model) phoneBanner() string {
+	if d := m.currentDevice(); d != nil && !d.Connected {
+		return "⚠ Phone unreachable · messages wait in the outbox"
+	}
+	return ""
+}
+
+func bannerLines(m *Model) int {
+	if m.phoneBanner() == "" {
+		return 0
+	}
+	return 1
+}
+
 func noticeLines(m *Model) int {
 	if m.composerNotice() == "" {
 		return 0

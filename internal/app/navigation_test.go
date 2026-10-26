@@ -70,7 +70,7 @@ func TestKeyboardPaneRoutesAndFocusPreservation(t *testing.T) {
 				if step.pane == paneComposer && !strings.Contains(view, "▸ Compose") {
 					t.Fatal("composer focus not labelled")
 				}
-				if step.pane == paneConversation && !strings.Contains(view, "▸ History") {
+				if step.pane == paneConversation && !strings.Contains(view, "History") {
 					t.Fatal("history focus not labelled")
 				}
 			}
@@ -195,5 +195,41 @@ func TestFocusPaletteActions(t *testing.T) {
 		if m.modal != "" || m.history.pane != action.pane {
 			t.Fatalf("palette action %s did not focus expected area", action.name)
 		}
+	}
+}
+
+// Outside the composer ← and → step between the sidebar and the history; in
+// the composer they stay with the text.
+func TestArrowsStepBetweenPanes(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	press := func(k tea.KeyType) { m.Update(tea.KeyMsg{Type: k}) }
+
+	m.setPane(paneThreads)
+	press(tea.KeyRight)
+	if m.history.pane != paneConversation {
+		t.Fatalf("→ from threads focused %d, want the history", m.history.pane)
+	}
+	press(tea.KeyLeft)
+	if m.history.pane != paneThreads {
+		t.Fatalf("← from history focused %d, want threads", m.history.pane)
+	}
+	m.setPane(paneContacts)
+	press(tea.KeyRight)
+	if m.history.pane != paneConversation {
+		t.Fatalf("→ from contacts focused %d, want the history", m.history.pane)
+	}
+	press(tea.KeyLeft)
+	if m.history.pane != paneContacts {
+		t.Fatalf("← went to %d, want back to contacts", m.history.pane)
+	}
+
+	m.focusArea(paneComposer)
+	m.editor.SetValue("ab")
+	press(tea.KeyLeft)
+	if m.history.pane != paneComposer || !m.focus {
+		t.Fatal("← left the composer instead of moving the cursor")
 	}
 }

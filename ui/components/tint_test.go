@@ -26,132 +26,144 @@ func testRenderer() tideui.Renderer {
 	return tideui.NewRenderer(themes.Base("catppuccin-mocha"), tideui.StyleOptions{})
 }
 
-// sgrFor is the foreground sequence a theme's accent renders as.
+// sgrFor is the colour parameters of a theme's accent as a foreground, which
+// appear inside whatever sequence a row combines them into.
 func sgrFor(t *testing.T, theme string) string {
 	t.Helper()
 	accent := themes.Accent(theme)
 	if accent == "" {
 		t.Fatalf("theme %q has no accent", theme)
 	}
-	rendered := lipgloss.NewStyle().Foreground(accent).Render("x")
-	prefix, _, found := strings.Cut(rendered, "x")
-	if !found || prefix == "" {
-		t.Fatalf("no opening sequence for %q: %q", theme, rendered)
+	return termenv.TrueColor.Color(string(accent)).Sequence(false)
+}
+
+// chipSGR is the background parameters of a theme's monogram chip.
+func chipSGR(t *testing.T, theme string) string {
+	t.Helper()
+	return "4" + strings.TrimPrefix(sgrFor(t, theme), "3")
+}
+
+func contactRows(items []contacts.Contact, selected int, focused bool) []string {
+	out := ContactList(testRenderer(), ContactView{Items: items, Selected: selected, Width: 40, Height: 10, Focused: focused})
+	return strings.Split(out, "\n")
+}
+
+// row finds the line naming who.
+func row(t *testing.T, rows []string, who string) string {
+	t.Helper()
+	for _, r := range rows {
+		if strings.Contains(ansi.Strip(r), who) {
+			return r
+		}
 	}
-	return prefix
+	t.Fatalf("no row for %q", who)
+	return ""
 }
 
 // A contact's theme is visible where contacts are chosen, not only once their
-// conversation is open.
+// conversation is open: on the chip, and on the name.
 func TestContactListTintsThemedNames(t *testing.T) {
 	truecolor(t)
 	list := []contacts.Contact{
 		{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"},
 		{Name: "Family", PhoneNumber: "+1555000003"},
 	}
-	// Select neither row, so the tint is not suppressed by the selection.
-	out := ContactList(testRenderer(), list, -1, "", 30, 8, "", false)
-	rows := strings.Split(out, "\n")
-
-	amy, family := rows[0], rows[1]
-	if !strings.Contains(amy, sgrFor(t, "rose-pine")) {
+	rows := contactRows(list, -1, true)
+	amy, family := row(t, rows, "Amy"), row(t, rows, "Family")
+	if !strings.Contains(amy, sgrFor(t, "rose-pine")) || !strings.Contains(amy, chipSGR(t, "rose-pine")) {
 		t.Errorf("a themed contact was not tinted: %q", amy)
 	}
-	if strings.Contains(family, sgrFor(t, "rose-pine")) {
+	if strings.Contains(family, "rose") || strings.Contains(family, sgrFor(t, "rose-pine")) {
 		t.Errorf("an unthemed contact borrowed another's accent: %q", family)
 	}
-	// Both rows still read correctly and occupy the same width.
-	if got := ansi.Strip(amy); !strings.Contains(got, "Amy") {
-		t.Errorf("name lost: %q", got)
-	}
-	if w := ansi.StringWidth(amy); w != ansi.StringWidth(family) {
-		t.Errorf("tinting changed the row width: %d vs %d", w, ansi.StringWidth(family))
+	if w := ansi.StringWidth(amy); w != 40 || w != ansi.StringWidth(family) {
+		t.Errorf("rows are %d and %d cells, want 40", w, ansi.StringWidth(family))
 	}
 }
 
-// Selection is drawn by inverting the row, and an accent chosen for the pane
-// background carries no contrast guarantee on it.
+// On the selection fill the accent has no contrast guarantee, so the name is
+// drawn plainly there and the chip keeps the colour.
 func TestSelectedRowIsNotTinted(t *testing.T) {
 	truecolor(t)
 	list := []contacts.Contact{{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"}}
-	selected := ContactList(testRenderer(), list, 0, "", 30, 8, "", false)
-	if strings.Contains(selected, sgrFor(t, "rose-pine")) {
-		t.Errorf("the selected row was tinted over the selection highlight: %q", strings.Split(selected, "\n")[0])
+	amy := row(t, contactRows(list, 0, true), "Amy")
+	if strings.Contains(amy, sgrFor(t, "rose-pine")) {
+		t.Errorf("the selected name was tinted over the selection: %q", amy)
+	}
+	if !strings.Contains(amy, chipSGR(t, "rose-pine")) {
+		t.Errorf("the selected row lost its chip colour: %q", amy)
+	}
+	if !strings.HasPrefix(ansi.Strip(amy), "▌") {
+		t.Errorf("the selected row has no selection bar: %q", ansi.Strip(amy))
 	}
 }
 
-// The tint closes with a reset, which would otherwise drop the row's
-// background for everything after the name. TideUI reopens it; this is the
-// guard that it still does.
+// A selected row is filled only while its list has focus; an unfocused list
+// keeps the bar alone.
+func TestSelectionFillFollowsFocus(t *testing.T) {
+	truecolor(t)
+	list := []contacts.Contact{{Name: "Amy", PhoneNumber: "+1555000001"}, {Name: "Bo", PhoneNumber: "+1555000002"}}
+	fill := func(focused bool) bool {
+		bg := testRenderer().Styles.ItemSelected.GetBackground().(lipgloss.Color)
+		return strings.Contains(row(t, contactRows(list, 0, focused), "Amy"), termenv.TrueColor.Color(string(bg)).Sequence(true))
+	}
+	if !fill(true) || fill(false) {
+		t.Errorf("selection fill focused=%v unfocused=%v, want true and false", fill(true), fill(false))
+	}
+	if !strings.HasPrefix(ansi.Strip(row(t, contactRows(list, 0, false), "Amy")), "▌") {
+		t.Error("an unfocused list lost its selection bar")
+	}
+}
+
+// Every segment of a row carries the row's background, so no reset leaves the
+// rest of the line unpainted.
 func TestTintDoesNotPunchAHoleInTheRow(t *testing.T) {
 	truecolor(t)
 	list := []contacts.Contact{{Name: "Amy", PhoneNumber: "+1555000001", Theme: "rose-pine"}}
-	row := strings.Split(ContactList(testRenderer(), list, -1, "", 30, 8, "", false), "\n")[0]
-
-	// After the name's reset the row style must be re-established, so the row
-	// does not end on a bare reset with padding left unpainted.
-	name := strings.Index(row, "Amy")
-	if name < 0 {
-		t.Fatalf("name missing: %q", row)
-	}
-	after := row[name+len("Amy"):]
-	reset := strings.Index(after, "\x1b[0m")
-	if reset < 0 {
-		t.Fatalf("the tint was never closed: %q", row)
-	}
-	if !strings.Contains(after[reset+len("\x1b[0m"):], "\x1b[") {
-		t.Errorf("nothing reopened after the tint, so the row's padding is unpainted: %q", row)
+	amy := row(t, contactRows(list, -1, true), "Amy")
+	after := amy[strings.Index(amy, "Amy")+len("Amy"):]
+	if !strings.Contains(after, "\x1b[") {
+		t.Errorf("nothing painted after the name: %q", amy)
 	}
 }
 
-// A thread shows the palette its conversation will open in.
+// A search with no results says so, rather than claiming there are no
+// conversations at all.
+func TestContactSearchWithNoMatches(t *testing.T) {
+	out := ansi.Strip(ContactList(testRenderer(), ContactView{Width: 40, Height: 10, Query: "zed"}))
+	if !strings.Contains(out, "No contacts match “zed”") || strings.Contains(out, "No conversations yet") {
+		t.Errorf("empty search misreported:\n%s", out)
+	}
+}
+
+// A thread shows the palette its conversation will open in, selected or not.
 func TestThreadsTintFromTheSuppliedMap(t *testing.T) {
 	truecolor(t)
 	ts := []domain.Thread{
 		{ID: "t1", DisplayName: "Amy", LastMessage: "hi"},
 		{ID: "t2", DisplayName: "Family", LastMessage: "hi"},
 	}
-	out := Threads(testRenderer(), ts, "t2", 30, 12, map[string]string{"t1": "nord"}, nil)
-	nord := themes.Base("nord")
-	// opener is the escape a style begins with, so a line can be checked for
-	// being painted in it from its very first cell.
-	opener := func(st lipgloss.Style) string {
-		r := st.Render("x")
-		return r[:strings.Index(r, "x")]
+	render := func(selected string, th map[string]string) []string {
+		return strings.Split(Threads(testRenderer(), ThreadView{Threads: ts, Selected: selected, Width: 30, Height: 12, Themes: th, Focused: true}), "\n")
 	}
-	name := opener(lipgloss.NewStyle().Background(nord.BorderFocus).Foreground(nord.Bg).Bold(true))
-	preview := opener(lipgloss.NewStyle().Background(nord.Bg).Foreground(nord.Fg))
-	// Both lines of a themed thread are bands the width of the pane.
-	check := func(out string, selected bool) {
-		t.Helper()
-		lines := strings.Split(out, "\n")
-		for i, want := range []string{name, preview} {
-			line := lines[i]
-			if !strings.HasPrefix(line, want) || strings.Count(line, "\x1b[0m") != 1 || !strings.HasSuffix(line, "\x1b[0m") {
-				t.Errorf("line %d is not one band in the theme's colours: %q", i, line)
+	for _, selected := range []string{"t1", "t2"} {
+		lines := render(selected, map[string]string{"t1": "nord"})
+		if !strings.Contains(lines[0], chipSGR(t, "nord")) {
+			t.Errorf("selected=%s: the themed thread has no chip in its palette: %q", selected, lines[0])
+		}
+		for i, line := range lines[:2] {
+			if w := ansi.StringWidth(line); w != 30 {
+				t.Errorf("selected=%s line %d is %d cells, want the pane's 30", selected, i, w)
 			}
-			plain := ansi.Strip(line)
-			if ansi.StringWidth(plain) != 30 {
-				t.Errorf("line %d is %d cells, want the pane's 30: %q", i, ansi.StringWidth(plain), plain)
-			}
-			if strings.HasPrefix(plain, "▸") != selected {
-				t.Errorf("line %d selection mark = %v, want %v: %q", i, !selected, selected, plain)
+			if strings.HasPrefix(ansi.Strip(line), "▌") != (selected == "t1") {
+				t.Errorf("selected=%s line %d selection bar wrong: %q", selected, i, ansi.Strip(line))
 			}
 		}
 		if !strings.Contains(ansi.Strip(lines[0]), "Amy") || !strings.Contains(ansi.Strip(lines[1]), "hi") {
-			t.Errorf("the themed thread lost its text:\n%s", ansi.Strip(out))
+			t.Errorf("the themed thread lost its text:\n%s", ansi.Strip(strings.Join(lines, "\n")))
 		}
 	}
-	check(out, false)
-	// The band carries its own background and text, so it stays on the
-	// selected entry, where a bare foreground tint would not; the selection
-	// is marked in the first column instead.
-	check(Threads(testRenderer(), ts, "t1", 30, 12, map[string]string{"t1": "nord"}, nil), true)
-	if !strings.Contains(ansi.Strip(out), "Family") {
-		t.Error("an unthemed thread stopped rendering")
-	}
-	// A thread absent from the map has no theme of its own.
-	if out2 := Threads(testRenderer(), ts, "t2", 30, 12, nil, nil); strings.Contains(out2, sgrFor(t, "nord")) {
+	if out := strings.Join(render("t2", nil), "\n"); strings.Contains(out, chipSGR(t, "nord")) {
 		t.Error("a thread was tinted with no themes supplied")
 	}
 }
@@ -166,16 +178,15 @@ func TestContactListFallsBackToTheBubblePalette(t *testing.T) {
 		{Name: "Outgoing only", PhoneNumber: "+1555000002", ThemeOut: "gruvbox-dark"},
 		{Name: "Both", PhoneNumber: "+1555000003", Theme: "rose-pine", ThemeIn: "nord"},
 	}
-	rows := strings.Split(ContactList(testRenderer(), list, -1, "", 40, 10, "", false), "\n")
-
-	if !strings.Contains(rows[0], sgrFor(t, "nord")) {
-		t.Errorf("a contact with only an incoming bubble palette was not tinted: %q", rows[0])
+	rows := contactRows(list, -1, true)
+	if r := row(t, rows, "Bubbled"); !strings.Contains(r, sgrFor(t, "nord")) {
+		t.Errorf("a contact with only an incoming bubble palette was not tinted: %q", r)
 	}
-	if strings.Contains(rows[1], sgrFor(t, "gruvbox-dark")) {
-		t.Errorf("an outgoing bubble palette coloured the contact's own row: %q", rows[1])
+	if r := row(t, rows, "Outgoing only"); strings.Contains(r, sgrFor(t, "gruvbox-dark")) {
+		t.Errorf("an outgoing bubble palette coloured the contact's own row: %q", r)
 	}
 	// The whole-conversation theme wins over the bubble palette.
-	if !strings.Contains(rows[2], sgrFor(t, "rose-pine")) || strings.Contains(rows[2], sgrFor(t, "nord")) {
-		t.Errorf("the bubble palette beat the conversation theme: %q", rows[2])
+	if r := row(t, rows, "Both"); !strings.Contains(r, sgrFor(t, "rose-pine")) || strings.Contains(r, sgrFor(t, "nord")) {
+		t.Errorf("the bubble palette beat the conversation theme: %q", r)
 	}
 }

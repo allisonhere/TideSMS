@@ -53,6 +53,9 @@ type Config struct {
 	General struct {
 		Theme         string `toml:"theme"`
 		CompactStatus bool   `toml:"compact_status"`
+		// ListSpacing is "standard", a blank line between thread list
+		// entries, or "compact", without one so more threads fit.
+		ListSpacing string `toml:"list_spacing"`
 	} `toml:"general"`
 	Composer struct {
 		Mode string `toml:"mode"`
@@ -101,6 +104,7 @@ type Config struct {
 func Default() Config {
 	var c Config
 	c.General.Theme = "tide"
+	c.General.ListSpacing = "standard"
 	c.Composer.Mode = "normal"
 	c.Composer.EnterSends = true
 	c.Composer.UndoSeconds = 4
@@ -149,6 +153,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Conversation.MaxWidth < 0 || c.Conversation.MaxWidth > 500 {
 		return Default(), fmt.Errorf("conversation max_width must be between 0 and 500")
+	}
+	if c.General.ListSpacing != "standard" && c.General.ListSpacing != "compact" {
+		return Default(), fmt.Errorf("general list_spacing must be standard or compact")
 	}
 	if c.Conversation.Corners != "round" && c.Conversation.Corners != "square" {
 		return Default(), fmt.Errorf("conversation corners must be round or square")

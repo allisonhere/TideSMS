@@ -38,6 +38,7 @@ const (
 	settingAIPolicy
 	settingScheduler
 	settingUndoSend
+	settingListSpacing
 )
 
 // undoSendChoices are the undo windows the settings row cycles through.
@@ -82,7 +83,7 @@ type settingsGroup struct {
 // conversation's own colours are set from its details screen (i or Ctrl+L),
 // where there is never any doubt about whose they are.
 func (m *Model) settingsGroups() []settingsGroup {
-	appearance := []settingsField{{settingTheme, "Theme"}}
+	appearance := []settingsField{{settingTheme, "Theme"}, {settingListSpacing, "List spacing"}}
 	appearance = append(appearance,
 		settingsField{settingBubbles, "Message bubbles"},
 		settingsField{settingCorners, "Bubble corners"},
@@ -288,6 +289,12 @@ func policyIndex(name string) int {
 	return 0
 }
 
+// compactList reports whether the thread list drops the blank line between
+// entries.
+func (m *Model) compactList() bool {
+	return m.cfg.General.ListSpacing == "compact"
+}
+
 func onOff(b bool) string {
 	if b {
 		return "on"
@@ -310,6 +317,11 @@ func (m *Model) settingsValue(id settingID, selected bool) string {
 		return onOff(m.cfg.Conversation.Bubbles)
 	case settingCorners:
 		return m.cfg.Conversation.Corners
+	case settingListSpacing:
+		if m.compactList() {
+			return "compact"
+		}
+		return "standard"
 	case settingFill:
 		return onOff(m.cfg.Conversation.FillBubbles)
 	case settingBubbleIn:
@@ -438,6 +450,12 @@ func (m *Model) settingsAdjust(delta int) tea.Cmd {
 		c.Conversation.FillBubbles = !c.Conversation.FillBubbles
 	case settingInlineMedia:
 		c.Conversation.InlineMedia = !c.Conversation.InlineMedia
+	case settingListSpacing:
+		if m.compactList() {
+			c.General.ListSpacing = "standard"
+		} else {
+			c.General.ListSpacing = "compact"
+		}
 	case settingScheduler:
 		c.Scheduler.Enabled = !c.Scheduler.Enabled
 	case settingUndoSend:

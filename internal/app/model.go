@@ -759,6 +759,9 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 	case devicesMsg:
 		m.discovering = false
 		m.devices = v.devices
+		// The offline banner takes a line from the conversation when the
+		// phone drops away, and gives it back when it returns.
+		m.layoutConversation()
 		if v.err != nil {
 			m.notify(v.err.Error(), true)
 		} else {
@@ -1017,6 +1020,12 @@ func (m *Model) Update(raw tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if v.String() == "tab" || v.String() == "shift+tab" {
 			m.cyclePane(v.String() == "shift+tab")
+			return m, nil
+		}
+		// Outside the composer ← and → move between the side-by-side panes,
+		// the sidebar and the history; in the composer they move the cursor.
+		if m.history.enabled && !m.focus && (v.String() == "left" || v.String() == "right") {
+			m.stepPane(v.String() == "left")
 			return m, nil
 		}
 		if m.focus {

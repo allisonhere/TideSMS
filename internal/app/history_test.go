@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/allisonhere/tidesms/internal/backend"
 	"github.com/allisonhere/tidesms/internal/backend/fake"
 	"github.com/allisonhere/tidesms/internal/config"
 	"github.com/allisonhere/tidesms/internal/contacts"
@@ -386,7 +387,7 @@ func TestSyncBuildsThreadsAndRendersBothDirections(t *testing.T) {
 		t.Fatalf("directions: %+v", ms)
 	}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Replying to Amy", "Are we still meeting", "You", "Yep, I'll be there."} {
+	for _, want := range []string{"Amy", "+15551234567", "Are we still meeting", "You", "Yep, I'll be there.", "✓ sent"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("conversation missing %q:\n%s", want, view)
 		}
@@ -1348,5 +1349,33 @@ func TestBubbleFillToggleFromSettings(t *testing.T) {
 	d.settle("filled again", func() bool { return m.cfg.Conversation.FillBubbles })
 	if !filled() {
 		t.Error("fill did not come back")
+	}
+}
+
+// An unreachable phone is said above the conversation, and the line it takes
+// comes out of the history, never pushing the composer off screen.
+func TestPhoneBannerKeepsTheComposerOnScreen(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	openThreadByID(t, d, amyThread)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	const banner = "Phone unreachable"
+	if view := ansi.Strip(m.View()); strings.Contains(view, banner) {
+		t.Fatal("banner shown while the phone is connected")
+	}
+	offline := append([]backend.Device(nil), m.devices...)
+	for i := range offline {
+		offline[i].Connected = false
+	}
+	m.Update(devicesMsg{devices: offline})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, banner) {
+		t.Fatalf("no banner with the phone unreachable:\n%s", view)
+	}
+	if n := len(strings.Split(view, "\n")); n != 30 {
+		t.Errorf("view is %d lines, want the window's 30", n)
+	}
+	if !strings.Contains(view, "Compose") || !strings.Contains(view, "Write a message") {
+		t.Errorf("the banner pushed the composer off screen:\n%s", view)
 	}
 }

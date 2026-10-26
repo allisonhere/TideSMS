@@ -64,14 +64,16 @@ func (m *Model) View() string {
 	if m.width < 54 || m.height < 16 {
 		return r.Render(tideui.Layout{Width: m.width, Height: m.height, Mode: tideui.SidebarOnly, Panes: [3]tideui.Pane{{Title: "TideSMS", Content: "Resize to at least 54 × 16\nDrafts remain safe.\nCtrl+P → Quit"}}})
 	}
-	list := components.ContactList(r, m.contactRows(), max(0, m.selected), m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching)
+	list := components.ContactList(r, components.ContactView{Items: m.contactRows(), Selected: max(0, m.selected), Active: m.recipient.PhoneNumber, Width: max(1, left-2), Height: body, Query: m.query, Searching: m.searching, Focused: !m.focus})
 	title := "New Message"
 	if m.sending {
 		title = "Sending…"
 	}
-	header := components.Recipient(r, m.recipient.Name, m.recipient.PhoneNumber)
 	// Fixed recipient region and editor viewport keep the composer stable on resize.
-	lines := strings.Split(header, "\n")
+	lines := strings.Split(components.Recipient(r), "\n")
+	if m.recipient.PhoneNumber != "" {
+		lines = components.ConversationHeader(r, m.recipient.Name, m.recipient.PhoneNumber, themes.First(m.recipient.Theme, m.recipient.ThemeIn), max(1, right-2))
+	}
 	for len(lines) < 4 {
 		lines = append(lines, "")
 	}
@@ -399,6 +401,7 @@ func historyHelp() []helpGroup {
 	return []helpGroup{
 		{"Moving around", []string{
 			"Tab / Shift+Tab Sidebar ↔ composer",
+			"← / →          Sidebar ↔ history",
 			"Alt+1/2/3      Threads / history / compose",
 			"j/k or ↑↓      Select thread or message",
 			"Enter          Open thread · inspect message",

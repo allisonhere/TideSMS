@@ -155,3 +155,25 @@ func TestProviderProfilesPersistAcrossSwitchAndRestart(t *testing.T) {
 		t.Fatal("switch mutated original config before save")
 	}
 }
+
+func TestListSpacingValidated(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if Default().General.ListSpacing != "standard" {
+		t.Fatalf("default list spacing = %q, want standard", Default().General.ListSpacing)
+	}
+	c := Default()
+	c.General.ListSpacing = "compact"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Load(p); err != nil || got.General.ListSpacing != "compact" {
+		t.Fatalf("round trip: %q err=%v", got.General.ListSpacing, err)
+	}
+	c.General.ListSpacing = "tight"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("unknown list spacing accepted")
+	}
+}

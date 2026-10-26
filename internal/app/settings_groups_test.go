@@ -129,3 +129,30 @@ func TestSettingsOpenByKey(t *testing.T) {
 		t.Errorf("Ctrl+O did not open settings from the composer: modal=%q", m.modal)
 	}
 }
+
+// List spacing is an Appearance row that switches between the two spacings.
+func TestListSpacingSetting(t *testing.T) {
+	m, _, _, d, _ := conversationFixture(t)
+	syncPhone(t, d)
+	d.run(m.action("Open settings"))
+	m.choice = -1
+	for i, f := range m.settingsFields() {
+		if f.id == settingListSpacing {
+			m.choice = i
+		}
+	}
+	if m.choice < 0 {
+		t.Fatal("no list spacing row")
+	}
+	if got := m.settingsValue(settingListSpacing, true); got != "standard" {
+		t.Fatalf("starts as %q, want standard", got)
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.cfg.General.ListSpacing != "compact" || !m.compactList() {
+		t.Fatalf("Enter left spacing %q, want compact", m.cfg.General.ListSpacing)
+	}
+	d.run(m.modalKey(tea.KeyMsg{Type: tea.KeyEnter}))
+	if m.cfg.General.ListSpacing != "standard" {
+		t.Fatalf("second Enter left spacing %q, want standard", m.cfg.General.ListSpacing)
+	}
+}

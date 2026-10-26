@@ -5,101 +5,13 @@ import (
 	"strings"
 
 	"github.com/allisonhere/tidesms/internal/backend"
-	"github.com/allisonhere/tidesms/internal/contacts"
-	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
-// tinted paints text in a theme's accent, so a list shows which palette a
-// contact or thread carries rather than leaving a theme visible only once its
-// conversation is open.
-//
-// The span closes with a reset, which is safe inside a row: TideUI renders a
-// row through StyleOver, and that re-opens the row's own attributes after every
-// reset, so only the name is tinted and the suffix and padding are unaffected.
-//
-// A selected row is left alone. Selection is drawn by inverting the row, and a
-// foreground chosen for the pane background has no contrast guarantee on it;
-// the accent is still visible on every other row.
-func tinted(text, theme string, selected bool) string {
-	if selected || theme == "" {
-		return text
-	}
-	accent := themes.Accent(theme)
-	if accent == "" {
-		return text
-	}
-	return lipgloss.NewStyle().Foreground(accent).Render(text)
-}
-
-// band paints a line the full width of the pane on a theme's own colours
-// rather than tinting it against the pane, so a thread entry reads as that
-// person's conversation at a glance. The name line sits on the accent, as
-// TideUI draws its own headings, and the message preview on the theme's
-// background and text, as a bubble would. Both pairs come from one palette, so
-// they are legible whatever the pane is, which is why a band is kept on the
-// selected entry where a bare tint is not. text is padded, or cut short, to
-// exactly w cells.
-func band(text, theme string, name bool, w int) string {
-	text = ansi.Truncate(text, w, "…")
-	return chipStyle(theme, name).Render(text + strings.Repeat(" ", max(0, w-ansi.StringWidth(text))))
-}
-
-func chipStyle(theme string, name bool) lipgloss.Style {
-	base := themes.Base(theme)
-	if name {
-		return lipgloss.NewStyle().Background(base.BorderFocus).Foreground(base.Bg).Bold(true)
-	}
-	return lipgloss.NewStyle().Background(base.Bg).Foreground(base.Fg)
-}
-
-func ContactList(r tideui.Renderer, items []contacts.Contact, selected int, active string, w, h int, query string, searching bool) string {
-	rows := []string{}
-	visible := max(1, h-3)
-	start := max(0, selected-visible+1)
-	if len(items) == 0 {
-		rows = append(rows, r.Styles.DetailMeta.Render("No conversations yet\nn starts a message · a adds a contact"))
-	}
-	for i := start; i < min(len(items), start+visible); i++ {
-		prefix := "  "
-		if items[i].PhoneNumber == active {
-			prefix = "● "
-		}
-		suffix := ""
-		if items[i].Synced {
-			suffix = "⟲"
-		}
-		// A contact may have been given only a bubble palette, which is just as
-		// much their colour as a whole theme. ThemeOut is left out: that is the
-		// colour of your own messages in their thread, not a mark of who they
-		// are.
-		palette := themes.First(items[i].Theme, items[i].ThemeIn)
-		name := tinted(contacts.SafeLabel(items[i].Name), palette, i == selected)
-		rows = append(rows, r.RenderRow(tideui.Row{Prefix: prefix, Text: name, Suffix: suffix, Selected: i == selected}, w))
-	}
-	for len(rows) < visible {
-		rows = append(rows, "")
-	}
-	label := "/ Search contacts"
-	if query != "" || searching {
-		label = "/ " + query
-		if searching {
-			label += "▏"
-		}
-	}
-	rows = append(rows, r.Styles.DetailMeta.Render(label), r.Styles.DetailMeta.Render("n new message · a add · ⟲ from phone"))
-	for i, line := range rows {
-		rows[i] = ansi.Truncate(line, w, "…")
-	}
-	return strings.Join(rows, "\n")
-}
-func Recipient(r tideui.Renderer, name, phone string) string {
-	if phone == "" {
-		return r.Styles.DetailTitle.Render("New message") + "\n\n" + r.Styles.DetailMeta.Render("Choose a contact or press n to enter a number.")
-	}
-	return r.Styles.DetailTitle.Render("To: "+contacts.SafeLabel(name)) + "\n" + r.Styles.DetailMeta.Render(phone)
+// Recipient is the compose screen's prompt before anyone has been chosen; once
+// they have, the screen shows their ConversationHeader instead.
+func Recipient(r tideui.Renderer) string {
+	return r.Styles.DetailTitle.Render("New message") + "\n\n" + r.Styles.DetailMeta.Render("Choose a contact or press n to enter a number.")
 }
 func Status(device *backend.Device, theme, mode, extra string) tideui.StatusBar {
 	connection := "KDE Connect ○ No phone selected"

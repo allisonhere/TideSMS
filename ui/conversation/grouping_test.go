@@ -8,6 +8,7 @@ import (
 	"github.com/allisonhere/tidesms/internal/domain"
 	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tideui"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -145,5 +146,31 @@ func TestCacheFollowsTheShape(t *testing.T) {
 	m.Layout(r, 80, 200, Options{Timestamps: "smart"})
 	if n := count(plain(m.lines), "sent"); n != 1 {
 		t.Errorf("a stale cached status survived: sent shown %d times:\n%s", n, strings.Join(plain(m.lines), "\n"))
+	}
+}
+
+// Delivery states read as a glyph and a word; only a failure is coloured as
+// one.
+func TestStatusLabels(t *testing.T) {
+	for s, want := range map[domain.Status]string{
+		domain.Queued: "◷ queued", domain.Sending: "… sending", domain.Sent: "✓ sent",
+		domain.Delivered: "✓✓ delivered", domain.Read: "✓✓ read", domain.Failed: "! failed",
+	} {
+		got, failed := statusLabel(s)
+		if got != want || failed != (s == domain.Failed) {
+			t.Errorf("statusLabel(%s) = %q, %v; want %q, %v", s, got, failed, want, s == domain.Failed)
+		}
+	}
+}
+
+// A divider centres its label on a rule that spans the conversation.
+func TestDividerIsCentred(t *testing.T) {
+	line := ansi.Strip(divider("Today", 42, lipgloss.NewStyle()))
+	if w := ansi.StringWidth(line); w != 40 {
+		t.Fatalf("divider is %d cells, want 40: %q", w, line)
+	}
+	left, right, ok := strings.Cut(line, " Today ")
+	if !ok || ansi.StringWidth(left)-ansi.StringWidth(right) > 1 || ansi.StringWidth(right)-ansi.StringWidth(left) > 1 {
+		t.Errorf("label not centred: %q", line)
 	}
 }

@@ -328,11 +328,11 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			if date == time.Now().Format("2006-01-02") {
 				label = "Today"
 			}
-			m.lines = append(m.lines, r.Styles.DetailMeta.Render("── "+label+" ──"))
+			m.lines = append(m.lines, divider(label, w, r.Styles.DetailMeta))
 			lastDate = date
 		}
 		if msg.Unread && !boundary {
-			m.lines = append(m.lines, r.Styles.Badge.Render("── Unread messages ──"))
+			m.lines = append(m.lines, divider("Unread messages", w, r.Styles.Badge))
 			boundary = true
 		}
 		// Date lines and the unread boundary depend on neighbouring messages and
@@ -362,7 +362,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		if !opts.Group && msg.Direction == domain.Incoming {
 			label = stamp
 		}
-		status := string(msg.Status)
+		status, failed := statusLabel(msg.Status)
 		body := Safe(msg.Body)
 		// A media-only message has no text; the attachment block is its
 		// content, so the empty-body placeholder would be misleading.
@@ -519,7 +519,11 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 			// The status sits against the same right edge as the sender and time,
 			// so an outgoing message reads as one block rather than three.
 			statusPad := strings.Repeat(" ", max(0, width-ansi.StringWidth(status)))
-			m.lines = append(m.lines, pad+statusPad+r.Styles.DetailMeta.Render(status))
+			statusStyle := r.Styles.DetailMeta
+			if failed {
+				statusStyle = statusStyle.UnsetItalic().Foreground(r.Styles.StatusError.GetForeground()).Bold(true)
+			}
+			m.lines = append(m.lines, pad+statusPad+statusStyle.Render(status))
 		}
 		if sh.spacer {
 			m.lines = append(m.lines, "")
@@ -536,7 +540,7 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		m.ends = append(m.ends, len(m.lines))
 	}
 	if len(m.Messages) == 0 {
-		m.lines = []string{r.Styles.DetailMeta.Render("No cached messages yet."), r.Styles.DetailMeta.Render("Refresh to request history from your phone.")}
+		m.lines = Centered([]string{"No cached messages yet.", "Refresh to request history from your phone."}, w, m.Height, r.Styles.DetailMeta)
 	}
 	if m.Follow {
 		m.Offset = max(0, len(m.lines)-m.Height)
@@ -545,6 +549,63 @@ func (m *Model) Layout(r tideui.Renderer, w, h int, opts Options) {
 		m.ensureSelected()
 	}
 }
+
+// statusLabel is how a message's delivery state reads under it: a glyph that
+// can be taken in at a glance, then the word, so nothing depends on knowing
+// the glyphs. failed marks the one state that needs acting on.
+func statusLabel(s domain.Status) (label string, failed bool) {
+	switch s {
+	case domain.Queued:
+		return "◷ queued", false
+	case domain.Scheduled:
+		return "◷ scheduled", false
+	case domain.Sending:
+		return "… sending", false
+	case domain.Sent, domain.Submitted:
+		return "✓ sent", false
+	case domain.Delivered:
+		return "✓✓ delivered", false
+	case domain.Read:
+		return "✓✓ read", false
+	case domain.Failed:
+		return "! failed", true
+	}
+	return string(s), false
+}
+
+// divider is a label centred on a rule across the conversation, for the date
+// and unread boundaries. The rule spans what View leaves after the selection
+// column, so it reaches the pane edge without being cut.
+func divider(label string, w int, style lipgloss.Style) string {
+	room := max(0, w-selectionWidth)
+	label = " " + label + " "
+	if ansi.StringWidth(label) >= room {
+		return style.Render(ansi.Truncate(label, room, "…"))
+	}
+	left := (room - ansi.StringWidth(label)) / 2
+	right := room - ansi.StringWidth(label) - left
+	return style.Render(strings.Repeat("─", left) + label + strings.Repeat("─", right))
+}
+
+// Centered places a short block of text in the middle of a w×h area, each
+// line on its own centre, padded to h lines, for a pane with nothing to show yet. The selection
+// column View adds is allowed for, so the block sits in the visual centre.
+func Centered(lines []string, w, h int, style lipgloss.Style) []string {
+	out := make([]string, 0, h)
+	for len(out) < max(0, (h-len(lines))/2) {
+		out = append(out, "")
+	}
+	for _, line := range lines {
+		line = ansi.Truncate(line, max(1, w-selectionWidth), "…")
+		pad := max(0, (w-selectionWidth-ansi.StringWidth(line))/2)
+		out = append(out, strings.Repeat(" ", pad)+style.Render(line))
+	}
+	for len(out) < h {
+		out = append(out, "")
+	}
+	return out
+}
+
 func highlight(r tideui.Renderer, line, query string) string {
 	// Case-folded rune matching keeps Unicode offsets intact.
 	a, q := []rune(line), []rune(query)

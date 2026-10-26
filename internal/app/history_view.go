@@ -3,7 +3,9 @@ package app
 import (
 	"fmt"
 	"github.com/allisonhere/tidesms/internal/contacts"
+	"github.com/allisonhere/tidesms/internal/themes"
 	"github.com/allisonhere/tidesms/ui/components"
+	"github.com/allisonhere/tidesms/ui/conversation"
 	"github.com/allisonhere/tideui"
 	"github.com/charmbracelet/x/ansi"
 	"strings"
@@ -28,46 +30,50 @@ func (m *Model) historyView() string {
 	threadThemes := m.threadThemes()
 	left, right, body, eh := m.dimensions()
 	cw := max(1, right-2)
-	name := m.recipient.Name
-	context := "Choose a thread or create a new message"
+	// The header names who the conversation is with, as their row in the
+	// sidebar does: their chip and name, then the number, or for a group who
+	// is in it. The member list is dropped when it merely repeats the name.
+	name, detail := m.recipient.Name, m.recipient.PhoneNumber
+	theme := themes.First(m.recipient.Theme, m.recipient.ThemeIn)
 	if t := h.active; t != nil {
-		name = t.DisplayName
-		context = "Replying to " + name
+		name, theme = t.DisplayName, threadThemes[t.ID]
+		detail = ""
+		if len(t.Participants) > 0 {
+			detail = t.Participants[0].Number
+		}
 		if t.IsGroup {
-			// Groups name their members here; the read-only notice sits on the
-			// composer's own line so this stays one line at every width. The
-			// member list is dropped when it merely repeats the thread name.
 			who := make([]string, 0, len(t.Participants))
 			for _, p := range t.Participants {
 				who = append(who, contacts.SafeLabel(p.Name))
 			}
-			members := strings.Join(who, ", ")
-			context = fmt.Sprintf("Replying to %s · %d people", name, len(t.Participants))
-			if members != "" && members != name {
-				context = fmt.Sprintf("Replying to %s · %s · %d people", name, members, len(t.Participants))
+			detail = fmt.Sprintf("%d people", len(t.Participants))
+			if members := strings.Join(who, ", "); members != "" && members != t.DisplayName {
+				detail += " · " + members
 			}
 		}
-	} else if m.recipient.PhoneNumber != "" {
-		context = "To: " + m.recipient.PhoneNumber
 	}
-	displayName := contacts.SafeLabel(name)
-	if h.pane == paneConversation {
-		displayName = "▸ History · " + displayName
+	open := h.active != nil || m.recipient.PhoneNumber != ""
+	lines := []string{"", ""}
+	if open {
+		lines = components.ConversationHeader(cr, name, detail, theme, cw)
 	}
-	lines := []string{cr.Styles.DetailTitle.Render(displayName), cr.Styles.DetailMeta.Render(context)}
+	if banner := m.phoneBanner(); banner != "" {
+		lines = append(lines, cr.Styles.DetailBody.Foreground(cr.Styles.StatusError.GetForeground()).Render(" "+banner))
+	}
 	history := h.view.View(cr, h.pane == paneConversation)
+	if !open {
+		rows := len(strings.Split(history, "\n"))
+		history = strings.Join(conversation.Centered([]string{"No conversation open", "Pick a thread · n new message"}, cw, rows, cr.Styles.DetailMeta), "\n")
+	}
 	lines = append(lines, strings.Split(history, "\n")...)
 	separator := cr.Styles.DetailMeta.Render(strings.Repeat("─", cw))
+	// Focus is marked in the text as well as the colour, for themes without
+	// colour; the history pane says it in its title.
 	composeLabel := "Compose"
 	if h.pane == paneComposer {
 		composeLabel = "▸ Compose"
 	}
-	composeRule := composeLabel + " " + strings.Repeat("─", max(0, cw-ansi.StringWidth(composeLabel)-1))
-	if h.pane == paneComposer {
-		lines = append(lines, cr.Styles.Badge.Render(ansi.Truncate(composeRule, cw, "")))
-	} else {
-		lines = append(lines, cr.Styles.DetailMeta.Render(ansi.Truncate(composeRule, cw, "")))
-	}
+	lines = append(lines, components.Heading(cr, composeLabel, cw, h.pane == paneComposer))
 	if notice := m.composerNotice(); notice != "" {
 		lines = append(lines, cr.Styles.StatusError.Render(notice))
 	}
@@ -102,12 +108,20 @@ func (m *Model) historyView() string {
 			hint += "▏"
 		}
 	}
+	// The draft's size sits flush right, where it stays put as the hint on
+	// the left changes with focus; the hint gives way to it when space is short.
+	est := m.composerEstimate()
 	if h.older {
-		hint = "Loading older messages…"
-	} else if est := m.composerEstimate(); est != "" {
-		hint += " · " + est
+		hint, est = "Loading older messages…", ""
 	}
-	lines = append(lines, separator, cr.Styles.DetailMeta.Render(hint), components.Notification(cr, m.notice, m.failed))
+	hint = ansi.Truncate(hint, max(1, cw-ansi.StringWidth(est)-2), "…")
+	// An empty notice draws nothing: its style's padding would otherwise leave
+	// a stray block in the corner.
+	notice := ""
+	if m.notice != "" {
+		notice = components.Notification(cr, m.notice, m.failed)
+	}
+	lines = append(lines, separator, components.Footer(cr, cw, hint, est), notice)
 	// Paint the conversation on its own background, reopening it after the inner
 	// styles' resets so the whole pane body carries the contact's palette rather
 	// than only its text colours.
@@ -132,21 +146,28 @@ func (m *Model) historyView() string {
 		// Contacts share the sidebar with threads rather than holding a column of
 		// their own: threads already carry resolved names, so the list is only
 		// wanted when it is being used, and the conversation gets the width.
-		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts · , settings", Content: components.Threads(r, h.threads, h.threadSelected, max(1, left-2), body, threadThemes, m.threadDrafts()), Focused: h.pane == paneThreads}
+		sidebar := tideui.Pane{Title: "Threads", Hint: "c contacts", Content: components.Threads(r, components.ThreadView{Threads: h.threads, Selected: h.threadSelected, Width: max(1, left-2), Height: body, Themes: threadThemes, Drafts: m.threadDrafts(), Compact: m.compactList(), Focused: h.pane == paneThreads}), Focused: h.pane == paneThreads}
 		if m.sidebarPane() == paneContacts {
-			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, left-2), body, m.query, m.searching), Focused: h.pane == paneContacts}
+			sidebar = tideui.Pane{Title: "Contacts", Hint: "Esc threads", Content: components.ContactList(r, components.ContactView{Items: m.contactRows(), Selected: m.selected, Active: m.recipient.PhoneNumber, Width: max(1, left-2), Height: body, Query: m.query, Searching: m.searching, Focused: h.pane == paneContacts}), Focused: h.pane == paneContacts}
 		}
 		layout.Panes = [3]tideui.Pane{sidebar, rightPane}
 	} else {
 		// A single active pane, still rendered by TideUI. Tab retains all pane state.
 		layout.Mode = tideui.ThreeColumn
 		layout.ColumnRatios = [3]float64{1, 0, 0}
+		// The tab bar gives a title a third of the width, where the position
+		// hint would push the title out; a short title alone says which pane
+		// this is.
 		active := rightPane
+		active.Hint = ""
+		if h.pane == paneConversation {
+			active.Title = "History"
+		}
 		switch h.pane {
 		case paneContacts:
-			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, m.contactRows(), m.selected, m.recipient.PhoneNumber, max(1, m.width-2), body, m.query, m.searching), Focused: true}
+			active = tideui.Pane{Title: "Contacts · Tab next", Content: components.ContactList(r, components.ContactView{Items: m.contactRows(), Selected: m.selected, Active: m.recipient.PhoneNumber, Width: max(1, m.width-2), Height: body, Query: m.query, Searching: m.searching, Focused: true}), Focused: true}
 		case paneThreads:
-			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, h.threads, h.threadSelected, max(1, m.width-2), body, threadThemes, m.threadDrafts()), Focused: true}
+			active = tideui.Pane{Title: "Threads · Tab next", Content: components.Threads(r, components.ThreadView{Threads: h.threads, Selected: h.threadSelected, Width: max(1, m.width-2), Height: body, Themes: threadThemes, Drafts: m.threadDrafts(), Compact: m.compactList(), Focused: true}), Focused: true}
 		}
 		// TideUI's Tabbed mode reserves a compact header and shows the active pane.
 		layout.Mode = tideui.Tabbed

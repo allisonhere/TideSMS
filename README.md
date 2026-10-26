@@ -188,6 +188,7 @@ Settings live in `~/.config/tidesms/config.toml`, your messages in `~/.local/sha
 ```toml
 [general]
 theme = "tide"
+list_spacing = "standard"  # or "compact": no blank line between threads
 
 [composer]
 mode = "normal"       # or "vim"
